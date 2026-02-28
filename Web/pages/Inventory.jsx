@@ -5,6 +5,7 @@ const EMPTY_FORM = { name: '', part_number: '', brand: '', quantity: '' }
 
 export default function Inventory() {
   const [items, setItems] = useState([])
+  const [latestStatusByInventoryId, setLatestStatusByInventoryId] = useState({})
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [showModal, setShowModal] = useState(false)
@@ -20,15 +21,35 @@ export default function Inventory() {
   async function fetchItems() {
     setLoading(true)
     setError(null)
-    const { data, error } = await supabase
-      .from('inventory')
-      .select('*')
-      .order('name', { ascending: true })
-    if (error) {
+    const [inventoryRes, logsRes] = await Promise.all([
+      supabase
+        .from('inventory')
+        .select('*')
+        .order('name', { ascending: true }),
+      supabase
+        .from('logs')
+        .select('inventory_id, status, inspected_at, created_at')
+        .order('inspected_at', { ascending: false }),
+    ])
+
+    if (inventoryRes.error) {
       setError('Failed to load inventory. Check your connection and try again.')
     } else {
-      setItems(data || [])
+      setItems(inventoryRes.data || [])
     }
+
+    if (!logsRes.error && Array.isArray(logsRes.data)) {
+      const statusMap = {}
+      for (const log of logsRes.data) {
+        const key = String(log.inventory_id ?? '')
+        if (!key || statusMap[key]) continue
+        statusMap[key] = log.status
+      }
+      setLatestStatusByInventoryId(statusMap)
+    } else {
+      setLatestStatusByInventoryId({})
+    }
+
     setLoading(false)
   }
 
@@ -98,10 +119,22 @@ export default function Inventory() {
     })
   }
 
-  const stockBadge = (qty) => {
-    if (qty === 0) return <span className="badge badge-critical"><span className="badge-dot" />Out of Stock</span>
-    if (qty < 10) return <span className="badge badge-warning"><span className="badge-dot" />Low Stock</span>
-    return <span className="badge badge-success"><span className="badge-dot" />In Stock</span>
+  const statusBadgeFromLog = (inventoryId) => {
+    const status = latestStatusByInventoryId[String(inventoryId)]
+    if (!status) return <span className="badge badge-neutral"><span className="badge-dot" />No Log</span>
+
+    const normalized = String(status).toLowerCase()
+    if (normalized === 'critical') {
+      return <span className="badge badge-critical"><span className="badge-dot" />{status}</span>
+    }
+    if (normalized === 'moderate') {
+      return <span className="badge badge-warning"><span className="badge-dot" />{status}</span>
+    }
+    if (normalized === 'low') {
+      return <span className="badge badge-success"><span className="badge-dot" />{status}</span>
+    }
+
+    return <span className="badge badge-info"><span className="badge-dot" />{status}</span>
   }
 
   return (
@@ -187,7 +220,7 @@ export default function Inventory() {
                     <td style={{ color: 'var(--text-secondary)' }}>{item.brand || '—'}</td>
                     <td className="mono">{item.quantity ?? '—'}</td>
                     <td className="mono" style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{formatCreatedAt(item.created_at)}</td>
-                    <td>{stockBadge(item.quantity)}</td>
+                    <td>{statusBadgeFromLog(item.id)}</td>
                     <td>
                       <div style={{ display: 'flex', gap: 8 }}>
                         <button className="btn btn-secondary btn-sm" onClick={() => openEdit(item)}>Edit</button>
