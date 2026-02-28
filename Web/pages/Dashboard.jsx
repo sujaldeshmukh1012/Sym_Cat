@@ -7,6 +7,7 @@ export default function Dashboard({ setActivePage }) {
   const [lowStock, setLowStock] = useState([])
   const [loading, setLoading] = useState(true)
   const [lastUpdated, setLastUpdated] = useState('')
+  const [dashboardError, setDashboardError] = useState('')
 
   useEffect(() => {
     fetchDashboardData()
@@ -14,6 +15,7 @@ export default function Dashboard({ setActivePage }) {
 
   async function fetchDashboardData() {
     setLoading(true)
+    setDashboardError('')
     const [inv, parts, logs, reports, recentLogsRes] = await Promise.all([
       supabase.from('inventory').select('id, quantity', { count: 'exact' }),
       supabase.from('machine_specs').select('id', { count: 'exact' }),
@@ -29,11 +31,25 @@ export default function Dashboard({ setActivePage }) {
       .order('quantity', { ascending: true })
       .limit(5)
 
+    const errors = [inv.error, parts.error, logs.error, reports.error, recentLogsRes.error, lowStockRes.error]
+      .filter(Boolean)
+      .map(error => error.message)
+
+    if (errors.length > 0) {
+      setDashboardError(errors[0])
+    }
+
+    const safeCount = (result) => {
+      if (typeof result.count === 'number') return result.count
+      if (Array.isArray(result.data)) return result.data.length
+      return 0
+    }
+
     setStats({
-      inventory: inv.count || 0,
-      parts: parts.count || 0,
-      logs: logs.count || 0,
-      reports: reports.count || 0,
+      inventory: safeCount(inv),
+      parts: safeCount(parts),
+      logs: safeCount(logs),
+      reports: safeCount(reports),
     })
     setRecentLogs(recentLogsRes.data || [])
     setLowStock(lowStockRes.data || [])
@@ -58,6 +74,16 @@ export default function Dashboard({ setActivePage }) {
         </div>
         <button className="btn btn-secondary btn-sm" onClick={fetchDashboardData}>↻ Refresh</button>
       </div>
+
+      {dashboardError && (
+        <div className="alert-banner critical" style={{ marginBottom: 16 }}>
+          <span>✕</span>
+          <div>
+            <div className="alert-banner-title">Dashboard Data Error</div>
+            <div className="alert-banner-body">{dashboardError}</div>
+          </div>
+        </div>
+      )}
 
       {/* KPI Strip */}
       <div className="kpi-strip">
