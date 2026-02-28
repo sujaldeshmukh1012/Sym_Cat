@@ -1,8 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../src/supabase'
 
-<<<<<<< HEAD
-=======
 const TEMPLATE_CARDS = [
   {
     id: 'T-1001',
@@ -24,7 +22,6 @@ const TEMPLATE_CARDS = [
   },
 ]
 
->>>>>>> b46de7695372845cc680edb2b91d0a85c2a5d5d7
 export default function Reports() {
   const [reports, setReports] = useState([])
   const [loading, setLoading] = useState(true)
@@ -41,11 +38,7 @@ export default function Reports() {
 
     const { data, error } = await supabase
       .from('report')
-<<<<<<< HEAD
-      .select('id, created_at, inspection_id, tasks, report_pdf, pdf_created')
-=======
       .select('id, inspection_id, report_pdf, pdf_created, created_at')
->>>>>>> b46de7695372845cc680edb2b91d0a85c2a5d5d7
       .order('created_at', { ascending: false })
 
     if (error) {
