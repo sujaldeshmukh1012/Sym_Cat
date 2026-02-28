@@ -16,22 +16,23 @@ export default function Dashboard({ setActivePage }) {
   async function fetchDashboardData() {
     setLoading(true)
     setDashboardError('')
-    const [inv, parts, logs, reports, recentLogsRes] = await Promise.all([
-      supabase.from('inventory').select('id, user_id, quantity, created_at', { count: 'exact' }),
-      supabase.from('machine_specs').select('id', { count: 'exact' }),
-      supabase.from('logs').select('id', { count: 'exact' }),
-      supabase.from('reports').select('id', { count: 'exact' }),
-      supabase.from('logs').select('id, user_id, status, inspected_at').order('inspected_at', { ascending: false }).limit(5),
+    const [inv, parts, logs, reports, recentLogsRes, orderCartRes] = await Promise.all([
+      supabase.from('inventory').select('id, stock_qty, created_at', { count: 'exact' }),
+      supabase.from('parts').select('id', { count: 'exact' }),
+      supabase.from('task').select('id', { count: 'exact' }),
+      supabase.from('report').select('id', { count: 'exact' }),
+      supabase.from('task').select('id, inspection_id, state, created_at').order('created_at', { ascending: false }).limit(5),
+      supabase.from('order_cart').select('inspection_id, status, created_at').order('created_at', { ascending: false }),
     ])
 
     const lowStockRes = await supabase
       .from('inventory')
-      .select('id, name, brand, quantity')
-      .lt('quantity', 10)
-      .order('quantity', { ascending: true })
+      .select('id, part_name, component_tag, stock_qty')
+      .lt('stock_qty', 10)
+      .order('stock_qty', { ascending: true })
       .limit(5)
 
-    const errors = [inv.error, parts.error, logs.error, reports.error, recentLogsRes.error, lowStockRes.error]
+    const errors = [inv.error, parts.error, logs.error, reports.error, recentLogsRes.error, orderCartRes.error, lowStockRes.error]
       .filter(Boolean)
       .map(error => error.message)
 
@@ -55,12 +56,16 @@ export default function Dashboard({ setActivePage }) {
         rowsVisible: Array.isArray(inv.data) ? inv.data.length : 0,
         sample: Array.isArray(inv.data) ? inv.data.slice(0, 3) : [],
       })
-      console.log('machine_specs', { error: parts.error?.message || null, count: parts.count })
-      console.log('logs', { error: logs.error?.message || null, count: logs.count })
-      console.log('reports', { error: reports.error?.message || null, count: reports.count })
+      console.log('parts', { error: parts.error?.message || null, count: parts.count })
+      console.log('task', { error: logs.error?.message || null, count: logs.count })
+      console.log('report', { error: reports.error?.message || null, count: reports.count })
       console.log('recentLogs', {
         error: recentLogsRes.error?.message || null,
         rows: Array.isArray(recentLogsRes.data) ? recentLogsRes.data.length : 0,
+      })
+      console.log('order_cart', {
+        error: orderCartRes.error?.message || null,
+        rows: Array.isArray(orderCartRes.data) ? orderCartRes.data.length : 0,
       })
       console.log('lowStock', {
         error: lowStockRes.error?.message || null,
@@ -69,13 +74,30 @@ export default function Dashboard({ setActivePage }) {
       console.groupEnd()
     }
 
+    const latestOrderStatusByInspectionId = {}
+    if (!orderCartRes.error && Array.isArray(orderCartRes.data)) {
+      for (const row of orderCartRes.data) {
+        const key = String(row.inspection_id ?? '')
+        if (!key || latestOrderStatusByInspectionId[key]) continue
+        latestOrderStatusByInspectionId[key] = String(row.status ?? '').replace(/^"|"$/g, '')
+      }
+    }
+
+    const resolvedRecentLogs = (recentLogsRes.data || []).map(log => {
+      const key = String(log.inspection_id ?? '')
+      return {
+        ...log,
+        resolved_state: latestOrderStatusByInspectionId[key] || log.state,
+      }
+    })
+
     setStats({
       inventory: inventoryCount,
       parts: safeCount(parts),
       logs: safeCount(logs),
       reports: safeCount(reports),
     })
-    setRecentLogs(recentLogsRes.data || [])
+    setRecentLogs(resolvedRecentLogs)
     setLowStock(lowStockRes.data || [])
     setLastUpdated(new Date().toLocaleTimeString())
     setLoading(false)
@@ -83,20 +105,20 @@ export default function Dashboard({ setActivePage }) {
 
   const kpis = [
     { label: 'Inventory Items', value: stats.inventory, icon: '▦', page: 'inventory' },
-    { label: 'Machine Specs', value: stats.parts, icon: '⚙', page: 'parts' },
-    { label: 'Total Log Entries', value: stats.logs, icon: '☰', page: 'logs' },
+    { label: 'Machine Parts', value: stats.parts, icon: '⚙', page: 'parts' },
+    { label: 'Total Tasks', value: stats.logs, icon: '☰', page: 'logs' },
     { label: 'Total Reports', value: stats.reports, icon: '◻', page: 'reports' },
   ]
 
   return (
-    <div>
+    <div className="dashboard-shell">
       {/* Page Header */}
-      <div className="page-header">
-        <div>
+      <div className="page-header dashboard-header">
+        <div className="dashboard-header-copy">
           <div className="page-title">Dashboard Overview</div>
           <div className="page-subtitle">Real-time operational summary · Last updated {lastUpdated}</div>
         </div>
-        <button className="btn btn-secondary btn-sm" onClick={fetchDashboardData}>↻ Refresh</button>
+        <button className="btn btn-sm dashboard-refresh-btn" onClick={fetchDashboardData}>↻ Refresh</button>
       </div>
 
       {dashboardError && (
@@ -110,15 +132,15 @@ export default function Dashboard({ setActivePage }) {
       )}
 
       {/* KPI Strip */}
-      <div className="kpi-strip">
+      <div className="kpi-strip dashboard-kpi-strip">
         {kpis.map(kpi => (
           <div
             key={kpi.label}
-            className="kpi-card"
+            className="kpi-card dashboard-kpi-card"
             style={{ cursor: 'pointer' }}
             onClick={() => setActivePage(kpi.page)}
           >
-            <div className="kpi-label">{kpi.icon} {kpi.label}</div>
+            <div className="kpi-label dashboard-kpi-label">{kpi.icon} {kpi.label}</div>
             {loading
               ? <div className="skeleton" style={{ height: 40, width: 80, marginBottom: 8 }} />
               : <div className="kpi-value">{kpi.value.toLocaleString()}</div>
@@ -137,7 +159,7 @@ export default function Dashboard({ setActivePage }) {
           <div>
             <div className="alert-banner-title">Low Stock Warning — {lowStock.length} item(s) below threshold</div>
             <div className="alert-banner-body">
-              {lowStock.map(i => `${i.name} (qty: ${i.quantity})`).join(' · ')}
+              {lowStock.map(i => `${i.part_name || 'Unnamed part'} (qty: ${i.stock_qty ?? 0})`).join(' · ')}
             </div>
           </div>
           <button className="btn btn-secondary btn-sm" style={{ marginLeft: 'auto' }} onClick={() => setActivePage('inventory')}>
@@ -147,9 +169,9 @@ export default function Dashboard({ setActivePage }) {
       )}
 
       {/* Operational Overview */}
-      <div className="grid-2" style={{ marginBottom: 24 }}>
+      <div className="grid-2 dashboard-panels" style={{ marginBottom: 24 }}>
         {/* Recent Logs */}
-        <div className="card">
+        <div className="card dashboard-panel-card">
           <div className="card-header">
             <span className="card-title">☰ Recent Log Entries</span>
             <button className="btn btn-secondary btn-sm" onClick={() => setActivePage('logs')}>View All</button>
@@ -168,22 +190,22 @@ export default function Dashboard({ setActivePage }) {
               <table>
                 <thead>
                   <tr>
-                    <th>User</th>
-                    <th>Status</th>
-                    <th>Inspected At</th>
+                    <th>Inspection</th>
+                    <th>State</th>
+                    <th>Created At</th>
                   </tr>
                 </thead>
                 <tbody>
                   {recentLogs.map(log => (
                     <tr key={log.id}>
-                      <td style={{ fontWeight: 500 }}>{log.user_id || '—'}</td>
+                      <td style={{ fontWeight: 500 }}>{log.inspection_id || '—'}</td>
                       <td>
                         <span className="badge badge-info">
-                          <span className="badge-dot" /> {log.status || '—'}
+                          <span className="badge-dot" /> {log.resolved_state || '—'}
                         </span>
                       </td>
                       <td className="mono" style={{ color: 'var(--text-secondary)', fontSize: 12 }}>
-                        {log.inspected_at ? new Date(log.inspected_at).toLocaleString() : '—'}
+                        {log.created_at ? new Date(log.created_at).toLocaleString() : '—'}
                       </td>
                     </tr>
                   ))}
@@ -194,7 +216,7 @@ export default function Dashboard({ setActivePage }) {
         </div>
 
         {/* Low Stock */}
-        <div className="card">
+        <div className="card dashboard-panel-card">
           <div className="card-header">
             <span className="card-title">▦ Low Stock Items</span>
             <span className="badge badge-warning">
@@ -214,16 +236,16 @@ export default function Dashboard({ setActivePage }) {
             ) : (
               <table>
                 <thead>
-                  <tr><th>Item</th><th>Brand</th><th>Qty</th></tr>
+                  <tr><th>Part</th><th>Component Tag</th><th>Stock Qty</th></tr>
                 </thead>
                 <tbody>
                   {lowStock.map(item => (
                     <tr key={item.id}>
-                      <td style={{ fontWeight: 500 }}>{item.name}</td>
-                      <td style={{ color: 'var(--text-secondary)' }}>{item.brand}</td>
+                      <td style={{ fontWeight: 500 }}>{item.part_name || '—'}</td>
+                      <td style={{ color: 'var(--text-secondary)' }}>{item.component_tag || '—'}</td>
                       <td>
-                        <span className={`badge ${item.quantity === 0 ? 'badge-critical' : 'badge-warning'}`}>
-                          <span className="badge-dot" />{item.quantity}
+                        <span className={`badge ${item.stock_qty === 0 ? 'badge-critical' : 'badge-warning'}`}>
+                          <span className="badge-dot" />{item.stock_qty}
                         </span>
                       </td>
                     </tr>

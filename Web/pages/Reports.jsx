@@ -67,7 +67,7 @@ export default function Reports() {
       const objectUrl = URL.createObjectURL(blob)
       const link = document.createElement('a')
       link.href = objectUrl
-      link.download = `${report.title || `report-${report.id}`}.pdf`
+      link.download = `report-${report.id}.pdf`
       document.body.appendChild(link)
       link.click()
       link.remove()
@@ -89,9 +89,7 @@ export default function Reports() {
   }
 
   const query = search.trim().toLowerCase()
-  const liveReports = reports.map(report => ({ ...report, isTemplate: false }))
-  const allReports = [...TEMPLATE_CARDS, ...liveReports]
-  const filtered = allReports.filter(report =>
+  const filtered = reports.filter(report =>
     String(report.id ?? '').toLowerCase().includes(query) ||
     String(report.inspection_id ?? '').toLowerCase().includes(query) ||
     String(report.title ?? '').toLowerCase().includes(query)
@@ -159,7 +157,7 @@ export default function Reports() {
           ) : (
             <div className="grid-3">
               {filtered.map(report => (
-                <div key={`${report.isTemplate ? 'template' : 'live'}-${report.id}`} className={`report-card${report.isTemplate ? ' report-card-template' : ''}`}>
+                <div key={`report-${report.id}`} className="report-card">
                   <div className="mono report-card-id">ID: {report.id ?? '—'}</div>
                   <div className="mono report-card-id" style={{ marginTop: -2 }}>Inspection: {report.inspection_id || '—'}</div>
                   {report.isTemplate && (
@@ -170,6 +168,9 @@ export default function Reports() {
                   <div className="report-card-title">{report.title || `Report ${report.id}`}</div>
                   <div className="mono" style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>
                     Created: {formatDate(report.pdf_created || report.created_at)}
+                  </div>
+                  <div className="mono" style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>
+                    PDF Created: {formatDate(report.pdf_created)}
                   </div>
                   <div className="report-card-url">
                     {report.report_pdf || 'Generating PDF…'}

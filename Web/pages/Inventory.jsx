@@ -3,7 +3,6 @@ import { supabase } from '../src/supabase'
 
 export default function Inventory() {
   const [items, setItems] = useState([])
-  const [latestStatusByInventoryId, setLatestStatusByInventoryId] = useState({})
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [syncStatus, setSyncStatus] = useState('synced')
@@ -14,16 +13,10 @@ export default function Inventory() {
   async function fetchItems() {
     setLoading(true)
     setError(null)
-    const [inventoryRes, logsRes] = await Promise.all([
-      supabase
-        .from('inventory')
-        .select('*')
-        .order('name', { ascending: true }),
-      supabase
-        .from('logs')
-        .select('inventory_id, status, inspected_at, created_at')
-        .order('inspected_at', { ascending: false }),
-    ])
+    const inventoryRes = await supabase
+      .from('inventory')
+      .select('id, created_at, part_number, part_name, component_tag, stock_qty, unit_price, fleet_serial')
+      .order('created_at', { ascending: false })
 
     if (inventoryRes.error) {
       setError('Failed to load inventory. Check your connection and try again.')
@@ -31,27 +24,27 @@ export default function Inventory() {
       setItems(inventoryRes.data || [])
     }
 
-    if (!logsRes.error && Array.isArray(logsRes.data)) {
-      const statusMap = {}
-      for (const log of logsRes.data) {
-        const key = String(log.inventory_id ?? '')
-        if (!key || statusMap[key]) continue
-        statusMap[key] = log.status
-      }
-      setLatestStatusByInventoryId(statusMap)
-    } else {
-      setLatestStatusByInventoryId({})
-    }
-
     setLoading(false)
   }
 
-  const filtered = items.filter(i =>
-    i.name?.toLowerCase().includes(search.toLowerCase()) ||
-    i.part_number?.toLowerCase().includes(search.toLowerCase()) ||
-    i.user_id?.toLowerCase().includes(search.toLowerCase()) ||
-    i.brand?.toLowerCase().includes(search.toLowerCase())
-  )
+  const normalizedSearch = search.trim().toLowerCase()
+  const isNumericSearch = /^\d+$/.test(normalizedSearch)
+  const hasExactFleetMatch = isNumericSearch && items.some(item => String(item.fleet_serial ?? '') === normalizedSearch)
+
+  const filtered = items.filter(item => {
+    if (!normalizedSearch) return true
+
+    if (hasExactFleetMatch) {
+      return String(item.fleet_serial ?? '') === normalizedSearch
+    }
+
+    return (
+      String(item.fleet_serial ?? '').toLowerCase().includes(normalizedSearch) ||
+      String(item.part_number ?? '').toLowerCase().includes(normalizedSearch) ||
+      String(item.part_name ?? '').toLowerCase().includes(normalizedSearch) ||
+      String(item.component_tag ?? '').toLowerCase().includes(normalizedSearch)
+    )
+  })
 
   function formatCreatedAt(value) {
     if (!value) return '—'
@@ -64,32 +57,34 @@ export default function Inventory() {
     })
   }
 
-  const statusBadgeFromLog = (inventoryId) => {
-    const status = latestStatusByInventoryId[String(inventoryId)]
-    if (!status) return <span className="badge badge-neutral"><span className="badge-dot" />No Log</span>
+  function formatCurrency(value) {
+    if (value === null || value === undefined || value === '') return '—'
+    const numeric = Number(value)
+    if (Number.isNaN(numeric)) return '—'
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      maximumFractionDigits: 0,
+    }).format(numeric)
+  }
 
-    const normalized = String(status).toLowerCase()
-    if (normalized === 'critical') {
-      return <span className="badge badge-critical"><span className="badge-dot" />{status}</span>
-    }
-    if (normalized === 'moderate') {
-      return <span className="badge badge-warning"><span className="badge-dot" />{status}</span>
-    }
-    if (normalized === 'low') {
-      return <span className="badge badge-success"><span className="badge-dot" />{status}</span>
-    }
-
-    return <span className="badge badge-info"><span className="badge-dot" />{status}</span>
+  function getStockState(value) {
+    const qty = Number(value)
+    if (Number.isNaN(qty)) return { label: 'Unknown', className: 'badge-neutral' }
+    if (qty === 0) return { label: 'Out of Stock', className: 'badge-critical' }
+    if (qty <= 5) return { label: 'Low Stock', className: 'badge-warning' }
+    return { label: 'In Stock', className: 'badge-success' }
   }
 
   return (
-    <div>
+    <div className="inventory-shell">
       <div className="page-header">
         <div>
           <div className="page-title">Inventory</div>
           <div className="page-subtitle">{items.length} total items tracked</div>
         </div>
-        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <button className="btn btn-secondary btn-sm" onClick={fetchItems}>↻ Refresh</button>
           <span className={`sync-pill ${syncStatus}`}>
             <span className="badge-dot" />
             {syncStatus === 'synced' ? 'Synced' : syncStatus === 'pending' ? 'Saving…' : 'Sync Failed'}
@@ -113,26 +108,26 @@ export default function Inventory() {
           <div className="search-bar">
             <span className="search-icon">⌕</span>
             <input
-              placeholder="Search by id, user, name, part number, or brand…"
+              placeholder="Search by fleet serial, part number, part name, or component tag…"
               value={search}
               onChange={e => setSearch(e.target.value)}
             />
           </div>
-          <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>{filtered.length} results</span>
+          <span className="inventory-results-count">{filtered.length} results</span>
         </div>
 
         <div className="table-wrapper" style={{ borderRadius: 0, border: 'none' }}>
           <table>
             <thead>
               <tr>
-                <th>ID</th>
-                <th>User ID</th>
-                <th>Item Name</th>
-                <th>Part Number</th>
-                <th>Brand</th>
-                <th>Quantity</th>
-                <th>Created At</th>
+                <th style={{ textAlign: 'center' }}>Fleet Serial</th>
+                <th style={{ textAlign: 'center' }}>Part Number</th>
+                <th>Part Name</th>
+                <th>Component Tag</th>
+                <th style={{ textAlign: 'center' }}>Stock Qty</th>
+                <th>Unit Price</th>
                 <th>Status</th>
+                <th>Created At</th>
               </tr>
             </thead>
             <tbody>
@@ -140,7 +135,7 @@ export default function Inventory() {
                 [...Array(6)].map((_, i) => (
                   <tr key={i}>
                     {[...Array(8)].map((_, j) => (
-                      <td key={j}><div className="skeleton" style={{ height: 16, width: j === 1 || j === 2 || j === 3 ? 140 : 80 }} /></td>
+                      <td key={j}><div className="skeleton" style={{ height: 16, width: j >= 1 && j <= 4 ? 130 : 90 }} /></td>
                     ))}
                   </tr>
                 ))
@@ -157,14 +152,18 @@ export default function Inventory() {
               ) : (
                 filtered.map(item => (
                   <tr key={item.id}>
-                    <td className="mono" style={{ color: 'var(--text-muted)', fontSize: 12 }}>{item.id}</td>
-                    <td className="mono" style={{ color: 'var(--text-muted)', fontSize: 12 }}>{item.user_id || '—'}</td>
-                    <td style={{ fontWeight: 600 }}>{item.name}</td>
-                    <td className="mono" style={{ color: 'var(--text-secondary)' }}>{item.part_number || '—'}</td>
-                    <td style={{ color: 'var(--text-secondary)' }}>{item.brand || '—'}</td>
-                    <td className="mono">{item.quantity ?? '—'}</td>
+                    <td className="mono" style={{ color: 'var(--text-muted)', fontSize: 12, textAlign: 'center' }}>{item.fleet_serial ?? '—'}</td>
+                    <td className="mono" style={{ color: 'var(--text-secondary)', textAlign: 'center' }}>{item.part_number || '—'}</td>
+                    <td style={{ fontWeight: 600 }}>{item.part_name || '—'}</td>
+                    <td style={{ color: 'var(--text-secondary)' }}>{item.component_tag || '—'}</td>
+                    <td className="mono" style={{ textAlign: 'center' }}>{item.stock_qty ?? '—'}</td>
+                    <td className="mono">{formatCurrency(item.unit_price)}</td>
+                    <td>
+                      <span className={`badge ${getStockState(item.stock_qty).className}`}>
+                        <span className="badge-dot" /> {getStockState(item.stock_qty).label}
+                      </span>
+                    </td>
                     <td className="mono" style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{formatCreatedAt(item.created_at)}</td>
-                    <td>{statusBadgeFromLog(item.id)}</td>
                   </tr>
                 ))
               )}

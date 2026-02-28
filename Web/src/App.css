@@ -687,6 +687,156 @@ input:focus, select:focus, textarea:focus {
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
 
+/* ─── INVENTORY PAGE ─── */
+.inventory-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.inventory-summary-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.inventory-summary-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  box-shadow: var(--shadow-card);
+}
+
+.inventory-summary-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 700;
+}
+
+.inventory-summary-value {
+  margin-top: 6px;
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1.1;
+}
+
+.inventory-results-count {
+  font-size: 13px;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+/* ─── MACHINE PARTS PAGE ─── */
+.machine-parts-shell {
+  display: flex;
+  flex-direction: column;
+}
+
+.machine-parts-description-cell {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 420px;
+  line-height: 1.4;
+}
+
+/* ─── LOGS PAGE ─── */
+.logs-shell {
+  display: flex;
+  flex-direction: column;
+}
+
+.logs-text-cell {
+  display: block;
+  white-space: pre-wrap;
+  line-height: 1.35;
+  max-height: 4.1em;
+  overflow: hidden;
+}
+
+/* ─── DASHBOARD (CAT THEME) ─── */
+.dashboard-shell {
+  --dash-cat-yellow: #FFCD11;
+  --dash-cat-black: #121217;
+}
+
+.dashboard-header {
+  background: linear-gradient(120deg, color-mix(in srgb, var(--dash-cat-yellow) 18%, var(--card)) 0%, var(--card) 70%);
+  border: 1px solid var(--border);
+  border-left: 6px solid var(--dash-cat-yellow);
+  border-radius: 12px;
+  padding: 16px 18px;
+  box-shadow: var(--shadow-card);
+}
+
+.dashboard-header-copy .page-subtitle {
+  color: var(--text-secondary);
+}
+
+.dashboard-refresh-btn {
+  min-width: 124px;
+  background: linear-gradient(135deg, var(--dash-cat-yellow) 0%, color-mix(in srgb, var(--dash-cat-yellow) 72%, #ffffff) 100%);
+  color: var(--dash-cat-black);
+  border: 1px solid color-mix(in srgb, var(--dash-cat-yellow) 65%, #000000);
+  font-weight: 700;
+}
+
+.dashboard-refresh-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--dash-cat-yellow) 86%, #000000) 0%, var(--dash-cat-yellow) 100%);
+  color: var(--dash-cat-black);
+}
+
+.dashboard-kpi-strip {
+  margin-top: 18px;
+}
+
+.dashboard-kpi-card {
+  position: relative;
+  overflow: hidden;
+  border-color: color-mix(in srgb, var(--border) 75%, var(--dash-cat-yellow));
+  transition: transform 140ms ease, box-shadow 140ms ease, border-color 140ms ease;
+}
+
+.dashboard-kpi-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-top: 3px solid var(--dash-cat-yellow);
+  pointer-events: none;
+}
+
+.dashboard-kpi-card:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--dash-cat-yellow) 58%, var(--border));
+  box-shadow: var(--shadow-elevated);
+}
+
+.dashboard-kpi-label {
+  color: color-mix(in srgb, var(--text-muted) 78%, var(--dash-cat-black));
+}
+
+.dashboard-panels {
+  margin-top: 4px;
+}
+
+.dashboard-panel-card {
+  border-color: color-mix(in srgb, var(--border) 82%, var(--dash-cat-yellow));
+}
+
+:root[data-theme='dark'] .dashboard-header {
+  background: linear-gradient(120deg, color-mix(in srgb, var(--dash-cat-yellow) 12%, var(--card)) 0%, var(--card) 70%);
+}
+
+:root[data-theme='dark'] .dashboard-refresh-btn {
+  color: #1b1f24;
+}
+
 /* ─── REPORT CARDS ─── */
 .reports-section {
   margin-bottom: 20px;
@@ -786,4 +936,5 @@ input:focus, select:focus, textarea:focus {
   .grid-2, .grid-3 { grid-template-columns: 1fr; }
   .page-header { flex-direction: column; }
   .topbar { padding: 0 16px; }
+  .inventory-summary-strip { grid-template-columns: 1fr; }
 }
