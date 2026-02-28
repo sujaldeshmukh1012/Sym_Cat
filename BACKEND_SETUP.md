@@ -18,6 +18,12 @@ Add these keys in `.env`:
 SUPABASE_URL=https://YOUR_PROJECT.supabase.co
 SUPABASE_KEY=YOUR_SUPABASE_KEY
 PUBLISHABLE_KEY=YOUR_SUPABASE_PUBLISHABLE_KEY
+SUPABASE_BUCKET_NAME=inspection_key
+SUPABASE_S3_ENDPOINT=https://YOUR_PROJECT.storage.supabase.co/storage/v1/s3
+SUPABASE_S3_ACCESS_KEY=YOUR_S3_ACCESS_KEY
+SUPABASE_S3_SECRET_KEY=YOUR_S3_SECRET_KEY
+SUPABASE_S3_REGION=us-west-2
+CAT_BACKEND_API_URL=http://127.0.0.1:8000
 ```
 
 Code reads keys from:
@@ -28,6 +34,12 @@ Loader location:
 - `CAT Inspect/CAT Inspect/Services/InspectionAPI.swift`
 - `SupabaseConfig` + `DotEnv`
 
+Where each key is used:
+- `SUPABASE_URL`, `SUPABASE_KEY`: iOS app REST calls + storage uploads
+- `SUPABASE_BUCKET_NAME`: iOS task-image uploads path target
+- `CAT_BACKEND_API_URL`: iOS report submit calls `POST /reports/generate/{inspection_id}?run_async=false`
+- `SUPABASE_S3_*`: Python API router uploads generated PDF to Supabase S3 endpoint
+
 ## 2) Which endpoints are being called right now
 
 The app builds endpoints automatically from `baseURL`:
@@ -36,6 +48,8 @@ The app builds endpoints automatically from `baseURL`:
 - `GET/POST/PATCH {baseURL}/rest/v1/todo`
 - `GET/POST/PATCH {baseURL}/rest/v1/task`
 - `GET/POST/PATCH {baseURL}/rest/v1/report`
+- `POST {baseURL}/storage/v1/object/{bucket}/{objectPath}` (task image upload)
+- `POST {CAT_BACKEND_API_URL}/reports/generate/{inspection_id}?run_async=false` (PDF generation using template)
 
 You do not need to hardcode each table endpoint separately.
 
@@ -77,6 +91,16 @@ enum IntegrationConfig {
 Then call those from:
 - `InspectionDatabase.saveTaskFeedbackAndSync(...)` for per-task AI call
 - a new upload service for image upload before submitting task feedback
+
+## 4.1) Report generation uses Python template now
+
+Python files used:
+- `api/pdf_generator.py`
+- `api/templates/report_template.html`
+- `api/routers/reports.py`
+
+Ensure API includes reports router:
+- `api/main.py` -> `app.include_router(reports_router)`
 
 ## 5) Security note
 
