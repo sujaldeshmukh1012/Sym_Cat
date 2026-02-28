@@ -27,6 +27,7 @@ CREATE TABLE machine_specs (
 CREATE TABLE logs (
     id              SERIAL PRIMARY KEY,
     user_id         UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+    inventory_id    INTEGER REFERENCES public.inventory(id) ON DELETE CASCADE,
     machine_spec_id INTEGER REFERENCES machine_specs(id) ON DELETE SET NULL,
     inspected_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),  -- when inspection was done
     status          VARCHAR(50) NOT NULL CHECK (status IN ('Low', 'Moderate', 'Critical')),
