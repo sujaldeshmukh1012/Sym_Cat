@@ -2,6 +2,7 @@ const NAV_ITEMS = [
   { key: 'dashboard', icon: '◈', label: 'Dashboard' },
   { key: 'inventory', icon: '▦', label: 'Inventory' },
   { key: 'parts', icon: '⚙', label: 'Machine Specs' },
+  { key: 'order_cart', icon: '🛒', label: 'Order Cart' },
   { key: 'logs', icon: '☰', label: 'Inspector Logs' },
   { key: 'reports', icon: '◻', label: 'Reports' },
 ]

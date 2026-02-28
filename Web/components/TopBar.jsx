@@ -4,6 +4,7 @@ const PAGE_TITLES = {
   dashboard: 'Dashboard Overview',
   inventory: 'Inventory Management',
   parts: 'Machine Specs',
+  order_cart: 'Order Cart',
   logs: 'Inspector Logs',
   reports: 'Reports',
 }
