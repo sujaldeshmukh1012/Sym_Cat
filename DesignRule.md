@@ -1,290 +1,246 @@
 SYSTEM DESIGN SPECIFICATION
-PROJECT: Industrial High-Intensity Dashboard (Mobile + Desktop)
-CONTEXT: Used by managers and field employees in heavy industrial environments.
-THEME: Light. Professional. Operationally fail-proof.
+PROJECT: CAT Inspect iOS App
+CONTEXT: Used by Caterpillar inspection officers for fleet walkarounds, task evidence capture, and report submission.
+THEME: Light by default with optional Dark Mode in Profile.
 
 ---
 
 DEFINE GLOBAL DESIGN PRINCIPLES
 
-* Prioritize clarity over aesthetics.
-* Eliminate ambiguity in all controls.
-* Minimize cognitive load.
-* Optimize for fast decision-making under stress.
-* Ensure identical structural logic across mobile and desktop.
-* Never rely solely on color to communicate meaning.
-* Assume intermittent connectivity.
+* Prioritize clarity and speed for field operation.
+* Keep camera capture area unobstructed during active inspection.
+* Use consistent interaction patterns across Fleet, Inspections, Reports, and Profile.
+* Never rely on color alone for status; always pair with text/icon.
+* Persist critical user and inspection data locally for resilience.
+* Support draft-first workflows when reports are not yet submitted.
 
 ---
 
-DEFINE GRID SYSTEM
+DEFINE PLATFORM + NAVIGATION
 
-SPACING:
+PLATFORM:
 
-* Use 8px base unit system.
-* All margins and padding must be multiples of 8px.
+* Primary target is iOS.
+* Optimize for one-hand usage and quick task transitions.
 
-DESKTOP:
+BOTTOM TAB NAVIGATION (REQUIRED):
 
-* 12-column grid.
-* Max content width: 1440px.
-* Sidebar width: 240px fixed.
-* Top navigation bar fixed height: 64px.
+1. Fleet
+2. Inspections
+3. Reports
+4. Profile
 
-MOBILE:
+RULES:
 
-* 4-column grid.
-* Top bar fixed height: 56px.
-* Bottom navigation required (max 5 items).
-* No hamburger menu for critical functions.
+* Tab order must remain fixed.
+* Shared search is accessible from Fleet, Inspections, and Reports.
+* Inspection workflow opens full-screen from Fleet/Inspections and returns to previous state when closed.
 
 ---
 
-DEFINE LAYOUT STRUCTURE
+DEFINE LAYOUT + SPACING
 
-DESKTOP LAYOUT:
-
-Top Bar (fixed)
-Left Sidebar (persistent)
-Main Content Area (card-based modular layout)
-
-MOBILE LAYOUT:
-
-Top Bar (fixed)
-Primary KPI Section
-Operational Cards
-Bottom Navigation (persistent)
-
-RULE:
-Structure hierarchy must remain identical across breakpoints.
-Desktop expands horizontally.
-Mobile stacks vertically.
-Module order must not change.
+* Use 8px spacing scale.
+* Touch targets >= 48px for all primary actions.
+* Keep camera preview dominant in workflow screens.
+* Workflow controls must stay in bottom panel to keep top/middle visible for capture.
 
 ---
 
 DEFINE TYPOGRAPHY
 
-Font family: Neutral sans-serif (Inter/SF/Roboto class).
-Maximum 3 font weights.
+* Font family: SF system sans-serif.
+* Max 3 effective hierarchy levels per section.
 
-Heading Large (H1): 24–28px
-Section Heading: 18px
-Body Text: 14–16px
-Minimum body size: 14px.
+Sizes:
 
-No decorative fonts.
-No excessive uppercase.
-No more than 3 hierarchy levels per screen.
+* Large heading: 24-28px
+* Section heading: 18px
+* Body: 14-16px
+* Caption: 12-13px
+
+Rules:
+
+* No decorative type.
+* Avoid all-caps blocks except short labels/badges.
 
 ---
 
-DEFINE COLOR SYSTEM (LIGHT THEME - ORANGE OPERATIONAL)
+DEFINE COLOR SYSTEM (CAT THEME)
 
-Background: #FFF4E8
-Card: #FFFCF9
-Border: #E5D0B8
-Primary Action (Orange): #C76A12
-Success: #3EA356
-Warning (Amber): #DE8A20
-Critical: #BA2C2C
-Heading Text: #2A1A0E
-Body Text: #423124
-Muted Text: #6E5A4A
-Button Text on Primary: #FFFFFF
+BRAND:
+
+* CAT Yellow: #FFCD11
+* CAT Black (dark text/button): near #121217
+
+LIGHT MODE TOKENS:
+
+* Background: soft neutral light
+* Card: white
+* Elevated card: light gray-blue
+* Border: subtle gray border
+* Heading text: dark neutral
+* Body text: medium neutral
+* Muted text: soft neutral
+
+DARK MODE TOKENS:
+
+* Background: near black
+* Card: charcoal
+* Elevated card: darker charcoal
+* Heading text: white
+* Body/muted text: desaturated light grays
+
+SEMANTIC:
+
+* Success: green
+* Warning: amber/yellow
+* Critical: red
+* Info: blue
 
 RULES:
 
-* Status = icon + text label + color.
-* Never use color alone to communicate state.
-* No gradients.
-* No decorative shadows beyond subtle elevation.
-* All text on cards/background must use Heading Text, Body Text, or Muted Text tokens. Never use light text on light surfaces.
-* Minimum contrast ratio for all text remains 4.5:1.
+* Primary CTAs use CAT Yellow gradient + dark text.
+* Draft state uses yellow indicator dot + text label "Draft".
+* Submitted/complete states use green indicators.
 
 ---
 
-DEFINE ORANGE THEME IMPLEMENTATION RULES
+DEFINE CORE SCREEN STRUCTURE
 
-* Orange is the primary brand/action color, not the base text color.
-* Large surfaces use warm off-white backgrounds, not saturated orange fills.
-* Primary CTA buttons use Primary Action orange with white text only.
-* Secondary actions must remain outline or text buttons with dark text.
-* Alert colors keep severity mapping (Critical/Warning/Info) and must include icon + text label.
+FLEET SCREEN:
 
----
+* Top nav title uses CAT logo in principal title area.
+* Must include:
+1. Create Inspection
+2. Search Fleet
+3. Scan Fleet QR
+4. Today's Inspections horizontal list
+5. Action to open Inspections screen
 
-DEFINE COMPONENT RULES
+INSPECTIONS SCREEN:
 
-BUTTONS:
+* Search trigger (shared global search)
+* Inspections to do (top list)
+* Previous inspections in expandable dropdown section
 
-* Minimum height: 48px.
-* Border radius: 8px.
-* One primary button per screen maximum.
-* Secondary = outline.
-* Tertiary = text only.
+REPORTS SCREEN:
 
-INTERACTION FEEDBACK:
+* Search trigger (shared global search)
+* Fleet report list with status indicator
+* Submitted reports: open PDF + feedback send
+* Draft reports: open legal completion form (no PDF preview requirement for draft)
 
-* Press state visible.
-* Animation duration < 200ms.
-* No decorative motion.
+PROFILE SCREEN:
 
-CARDS:
-Each card must include:
-
-* Clear title
-* Main data value
-* Status indicator
-* Timestamp (if data-driven)
-
-No empty decorative cards.
+* Editable inspector profile fields
+* Profile photo picker
+* Dark mode toggle
+* Persisted locally and reflected in dashboard header
 
 ---
 
-DEFINE DATA DISPLAY RULES
+DEFINE INSPECTION WORKFLOW
 
-KPIs:
+ENTRY:
 
-* Large numeric value.
-* Trend indicator (arrow + %).
-* Last updated timestamp.
+* Can start from Fleet (today list/create flow) or Inspections list.
 
-TABLES (DESKTOP):
+WORKFLOW SCREEN:
 
-* Sticky header.
-* Row height ≥ 44px.
-* Zebra striping.
-* Inline status badges.
-* Bulk actions only visible when rows selected.
+* Full-screen camera preview.
+* Top overlay: fleet info + progress metrics.
+* Bottom panel:
+  * Activate Walk Around button
+  * Horizontal task tabs
+  * Task detail + controls
 
-TABLES (MOBILE):
+TASK FLOW:
 
-* No horizontal scrolling.
-* Convert rows to expandable cards.
-* Show top 3 critical fields by default.
+* Each task must show task number and description.
+* Start Task -> enables evidence capture.
+* Capture up to 5 photos per task.
+* Captured task photos must be visible as thumbnails and previewable.
+* Voice recording (start/stop) captures audio evidence.
+* While recording voice, task switching must be disabled.
+* Send Feedback saves task feedback + media references.
+* After send, auto-advance to next task.
+* Completed task label/text should render success (green) state.
+* Reopening completed task must show previously saved feedback and photos.
 
-No dense raw data walls.
+ALL TASKS COMPLETE STATE:
 
----
+Replace task actions with:
 
-DEFINE ERROR HANDLING
+1. Save Draft
+2. Create Report
 
-All error states must include:
+SAVE DRAFT BEHAVIOR:
 
-* Clear title.
-* Human-readable explanation.
-* Primary recovery action.
-* Secondary fallback action.
+* Create draft report in Reports list.
+* Mark as Draft with yellow state.
+* Exit workflow and return to previous dashboard state.
 
-Never display raw system errors.
-Never leave user without next step.
+CREATE REPORT BEHAVIOR:
 
----
-
-DEFINE DESTRUCTIVE ACTION PROTOCOL
-
-For delete/critical changes:
-
-* Confirmation modal required.
-* Explicit description of impact.
-* Optional undo window.
-
-For high-risk operational commands:
-
-* Double confirmation.
-* Mobile: Slide to confirm.
-* Desktop: Hold to confirm (minimum 1 second).
+* Open legal report form.
+* Collect required legal/compliance inputs.
+* Submit as report (status Submitted).
+* Exit workflow and return to previous dashboard state.
 
 ---
 
-DEFINE ALERT SYSTEM
+DEFINE DATA + PERSISTENCE
 
-Severity Levels:
+INSPECTIONS DATABASE (LOCAL):
 
-1. Critical – Red – Non-dismissible until action taken.
-2. Warning – Amber – Dismissible.
-3. Info – Neutral.
+* Persist all inspections and their task records.
+* Persist per-task feedback text, audio filename, and photo filename array.
+* Maintain backward compatibility for older single-photo records.
 
-Critical alerts must:
+PROFILE STORAGE (LOCAL):
 
-* Appear as sticky banner.
-* Be visually dominant.
-* Provide immediate action button.
+* Persist editable inspector profile including image data.
 
----
+REPORT STORE (LOCAL):
 
-DEFINE OFFLINE BEHAVIOR
+* Persist report status (Draft/Submitted) and report metadata.
 
-System must detect connectivity state.
+API INTEGRATION GUIDELINE:
 
-Display banner when offline.
-
-All actions must show status:
-
-* Synced
-* Pending
-* Failed
-
-Queue offline actions locally.
-Retry automatically when connection restored.
-
-Never silently drop user actions.
+* Keep stubs/hooks for backend dashboard, voice stream, and report sync.
+* Local-first save, remote sync later.
 
 ---
 
-DEFINE ACCESSIBILITY
+DEFINE ACCESSIBILITY + USABILITY
 
-Minimum contrast ratio: 4.5:1.
-Full keyboard navigation on desktop.
-Touch targets ≥ 48px.
-Minimum spacing between interactive elements: 12px.
-No color-only communication.
-
----
-
-DEFINE PERFORMANCE CONSTRAINTS
-
-First meaningful paint < 2 seconds.
-Avoid blocking loaders.
-Prefer skeleton states over spinners.
-Must run on mid-tier industrial mobile devices.
-
----
-
-DEFINE DASHBOARD STRUCTURE TEMPLATE
-
-Every dashboard must contain:
-
-1. KPI Summary Strip (top)
-2. Active Alerts Section
-3. Operational Overview (cards/charts)
-4. Task / Action Queue
-5. Historical Insights Section
-
-Order must remain consistent across devices.
+* Contrast ratio >= 4.5:1.
+* Controls >= 48px touch targets.
+* Keep labels explicit for every major action.
+* Avoid blocking overlays that hide camera evidence area during inspection.
 
 ---
 
 DEFINE PROHIBITED PATTERNS
 
-* Hidden navigation for critical actions.
-* Infinite scroll dashboards.
-* Icon-only primary actions.
-* Modal stacking.
-* Decorative animations.
-* Contextless minimalism.
+* Hidden critical actions.
+* Contextless icon-only primary actions.
+* Multi-step modal stacking that interrupts active capture.
+* Losing captured evidence when switching tasks/screens.
+* Showing draft reports as finalized/submitted documents.
 
 ---
 
 DEFINE RELEASE VALIDATION CHECKLIST
 
-* Core task completion ≤ 3 steps.
-* All destructive actions protected.
-* Every alert actionable.
-* Mobile preserves hierarchy.
-* System fails safely.
-* No ambiguous controls.
-* No visual clutter.
+* Bottom tabs exactly: Fleet, Inspections, Reports, Profile.
+* Fleet contains create/search/scan/today list/open inspections.
+* Inspections has to-do + previous dropdown + search.
+* Reports supports draft and submitted paths distinctly.
+* Profile edits persist and reflect in dashboard header.
+* Workflow keeps camera visible and supports complete task evidence loop.
+* All-task completion exposes Save Draft / Create Report actions.
+* Save Draft and Create Report both return user to prior dashboard context.
 
 END SPECIFICATION.
