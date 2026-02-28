@@ -6,9 +6,29 @@
 import Foundation
 
 enum TaskReportStatus: String, CaseIterable, Codable {
-    case monitor = "Monitor"
+    case monitor = "Moderate"
     case pass = "Pass"
     case normal = "Normal"
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let raw = try container.decode(String.self)
+        switch raw.lowercased() {
+        case "monitor", "moderate":
+            self = .monitor
+        case "pass":
+            self = .pass
+        case "normal":
+            self = .normal
+        default:
+            self = .normal
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
 }
 
 struct StructuredTaskReportInput: Codable, Hashable, Identifiable {
@@ -18,6 +38,7 @@ struct StructuredTaskReportInput: Codable, Hashable, Identifiable {
     let sourceTitle: String
     var summaryTitle: String
     var status: TaskReportStatus
+    var taskFeedback: String
 }
 
 struct StructuredInspectionReportFormData: Codable, Hashable {
@@ -40,6 +61,7 @@ struct FleetTaskRecord: Identifiable, Codable, Hashable {
     var audioFileName: String?
     var backendSyncStatus: String
     var backendError: String
+    var walkthroughStatus: TaskReportStatus
     var updatedAt: Date
 
     enum CodingKeys: String, CodingKey {
@@ -56,6 +78,7 @@ struct FleetTaskRecord: Identifiable, Codable, Hashable {
         case audioFileName
         case backendSyncStatus
         case backendError
+        case walkthroughStatus
         case updatedAt
     }
 
@@ -72,6 +95,7 @@ struct FleetTaskRecord: Identifiable, Codable, Hashable {
         audioFileName: String?,
         backendSyncStatus: String = "pending",
         backendError: String = "",
+        walkthroughStatus: TaskReportStatus = .normal,
         updatedAt: Date
     ) {
         self.id = id
@@ -86,6 +110,7 @@ struct FleetTaskRecord: Identifiable, Codable, Hashable {
         self.audioFileName = audioFileName
         self.backendSyncStatus = backendSyncStatus
         self.backendError = backendError
+        self.walkthroughStatus = walkthroughStatus
         self.updatedAt = updatedAt
     }
 
@@ -102,6 +127,7 @@ struct FleetTaskRecord: Identifiable, Codable, Hashable {
         audioFileName = try container.decodeIfPresent(String.self, forKey: .audioFileName)
         backendSyncStatus = try container.decodeIfPresent(String.self, forKey: .backendSyncStatus) ?? "pending"
         backendError = try container.decodeIfPresent(String.self, forKey: .backendError) ?? ""
+        walkthroughStatus = try container.decodeIfPresent(TaskReportStatus.self, forKey: .walkthroughStatus) ?? .normal
         updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? Date()
 
         if let list = try container.decodeIfPresent([String].self, forKey: .photoFileNames) {
@@ -127,6 +153,7 @@ struct FleetTaskRecord: Identifiable, Codable, Hashable {
         try container.encodeIfPresent(audioFileName, forKey: .audioFileName)
         try container.encode(backendSyncStatus, forKey: .backendSyncStatus)
         try container.encode(backendError, forKey: .backendError)
+        try container.encode(walkthroughStatus, forKey: .walkthroughStatus)
         try container.encode(updatedAt, forKey: .updatedAt)
     }
 }
@@ -243,6 +270,7 @@ final class InspectionDatabase: ObservableObject {
                 audioFileName: nil,
                 backendSyncStatus: "pending",
                 backendError: "",
+                walkthroughStatus: .normal,
                 updatedAt: now
             )
         }
@@ -311,13 +339,15 @@ final class InspectionDatabase: ObservableObject {
         taskID: UUID,
         feedbackText: String,
         photoFileNames: [String],
-        audioFileName: String?
+        audioFileName: String?,
+        walkthroughStatus: TaskReportStatus
     ) {
         guard let inspectionIndex = inspections.firstIndex(where: { $0.id == inspectionID }),
               let taskIndex = inspections[inspectionIndex].tasks.firstIndex(where: { $0.id == taskID }) else { return }
         inspections[inspectionIndex].tasks[taskIndex].feedbackText = feedbackText
         inspections[inspectionIndex].tasks[taskIndex].photoFileNames = photoFileNames
         inspections[inspectionIndex].tasks[taskIndex].audioFileName = audioFileName
+        inspections[inspectionIndex].tasks[taskIndex].walkthroughStatus = walkthroughStatus
         inspections[inspectionIndex].tasks[taskIndex].completed = true
         inspections[inspectionIndex].tasks[taskIndex].updatedAt = Date()
         inspections[inspectionIndex].updatedAt = Date()
@@ -329,7 +359,8 @@ final class InspectionDatabase: ObservableObject {
         taskID: UUID,
         feedbackText: String,
         photoFileNames: [String],
-        audioFileName: String?
+        audioFileName: String?,
+        walkthroughStatus: TaskReportStatus
     ) async -> String {
         print("[BackendSync] saveTaskFeedbackAndSync.start inspectionID=\(inspectionID) taskID=\(taskID) photos=\(photoFileNames.count)")
         saveTaskFeedback(
@@ -337,7 +368,8 @@ final class InspectionDatabase: ObservableObject {
             taskID: taskID,
             feedbackText: feedbackText,
             photoFileNames: photoFileNames,
-            audioFileName: audioFileName
+            audioFileName: audioFileName,
+            walkthroughStatus: walkthroughStatus
         )
 
         guard let inspectionIndex = inspections.firstIndex(where: { $0.id == inspectionID }),
@@ -354,13 +386,30 @@ final class InspectionDatabase: ObservableObject {
         }
 
         do {
-            let imageRefs = photoFileNames.map { "local://\($0)" }
+            let backendInspectionID = inspections[inspectionIndex].backendInspectionID
+            let localPhotos = photoFileNames.compactMap { name -> (fileName: String, data: Data, mimeType: String)? in
+                let url = localMediaURL(fileName: name)
+                guard let data = try? Data(contentsOf: url) else { return nil }
+                let lower = name.lowercased()
+                let mime = lower.hasSuffix(".png") ? "image/png" : "image/jpeg"
+                return (fileName: name, data: data, mimeType: mime)
+            }
+            let imageRefs: [String]
+            if let backendInspectionID {
+                imageRefs = try await backend.uploadTaskImages(
+                    inspectionID: backendInspectionID,
+                    taskID: backendTaskID,
+                    localPhotos: localPhotos
+                )
+            } else {
+                imageRefs = photoFileNames.map { "local://\($0)" }
+            }
             let fleetIDContext = inspections[inspectionIndex].backendFleetID.map(String.init) ?? "unknown"
             let inspectionContext = inspections[inspectionIndex].backendInspectionID.map(String.init) ?? "unknown"
             let voiceContext = audioFileName.map { "voice_note=\($0)" } ?? "voice_note=none"
             let combinedFeedback = """
             \(feedbackText)
-            [context inspection_id=\(inspectionContext) fleet_id=\(fleetIDContext) \(voiceContext) images=\(imageRefs.joined(separator: ","))]
+            [context inspection_id=\(inspectionContext) fleet_id=\(fleetIDContext) task_status=\(walkthroughStatus.rawValue) \(voiceContext) images=\(imageRefs.joined(separator: ","))]
             """
             try await backend.submitTaskFeedback(
                 taskID: backendTaskID,
@@ -405,13 +454,47 @@ final class InspectionDatabase: ObservableObject {
         }
 
         let backendTaskIDs = form.taskInputs.compactMap(\.backendTaskID)
-        let reportBody = renderReportDocumentBody(record: record, form: form)
+        let reportPayload = buildReportPayload(record: record, form: form)
         let result = try await backend.submitFinalReport(
             inspectionID: backendInspectionID,
             taskIDs: backendTaskIDs,
-            reportDocument: reportBody
+            reportPayload: reportPayload
         )
+        let reportBody = renderReportDocumentBody(record: record, form: form)
         return (result.reportID, result.reportPDF, reportBody)
+    }
+
+    private func buildReportPayload(
+        record: FleetInspectionRecord,
+        form: StructuredInspectionReportFormData
+    ) -> BackendReportPayload {
+        let overallStatus: String = form.taskInputs.contains(where: { $0.status == .monitor }) ? "AMBER" : "GREEN"
+        let anomalies: [[String: String]] = form.taskInputs.map { task in
+            let severity: String = {
+                switch task.status {
+                case .monitor:
+                    return "Moderate"
+                case .normal, .pass:
+                    return "Normal"
+                }
+            }()
+            return [
+                "component": task.summaryTitle,
+                "issue": "Task \(task.taskNumber) status: \(task.status.rawValue)",
+                "description": task.taskFeedback.isEmpty ? task.sourceTitle : task.taskFeedback,
+                "severity": severity,
+                "recommended_action": form.comments.isEmpty ? "Review and close task findings." : form.comments
+            ]
+        }
+        let component = form.taskInputs.first?.summaryTitle ?? record.assetName
+        let impact = "\(form.generalInfo)\n\(form.comments)".trimmingCharacters(in: .whitespacesAndNewlines)
+        return BackendReportPayload(
+            componentIdentified: component.isEmpty ? "Fleet Inspection" : component,
+            overallStatus: overallStatus,
+            operationalImpact: impact.isEmpty ? "Inspection summary submitted." : impact,
+            anomalies: anomalies,
+            inspectorName: record.inspectorName
+        )
     }
 
     private func renderReportDocumentBody(
@@ -429,7 +512,8 @@ final class InspectionDatabase: ObservableObject {
                     "- task_number: \($0.taskNumber)",
                     "  backend_task_id: \($0.backendTaskID.map(String.init) ?? "n/a")",
                     "  summarized_title: \($0.summaryTitle)",
-                    "  status: \($0.status.rawValue)"
+                    "  status: \($0.status.rawValue)",
+                    "  feedback: \($0.taskFeedback)"
                 ].joined(separator: "\n")
             }
             .joined(separator: "\n")
@@ -479,6 +563,7 @@ final class InspectionDatabase: ObservableObject {
                 audioFileName: nil,
                 backendSyncStatus: "pending",
                 backendError: "",
+                walkthroughStatus: .normal,
                 updatedAt: Date()
             )
         }
@@ -501,5 +586,10 @@ final class InspectionDatabase: ObservableObject {
     private func save() {
         guard let data = try? encoder.encode(inspections) else { return }
         try? data.write(to: dbFileURL, options: [.atomic])
+    }
+
+    private func localMediaURL(fileName: String) -> URL {
+        let base = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+        return (base ?? URL(fileURLWithPath: NSTemporaryDirectory())).appendingPathComponent(fileName)
     }
 }

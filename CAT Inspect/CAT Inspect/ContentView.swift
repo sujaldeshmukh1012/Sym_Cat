@@ -142,7 +142,8 @@ private struct LegalReportFormData {
 
 @MainActor
 private final class ReportStore: ObservableObject {
-    @Published var reports: [FleetReportRecord] = FleetReportRecord.dummy
+    @Published var reports: [FleetReportRecord] = []
+    private let backend = SupabaseInspectionBackend.shared
 
     func addDraft(from inspection: FleetInspectionRecord) {
         if reports.contains(where: { $0.sourceInspectionID == inspection.id && $0.status == .draft }) {
@@ -216,6 +217,30 @@ private final class ReportStore: ObservableObject {
         reports[index].legalWitnessName = legal.witnessName
         reports[index].legalCorrectiveActions = legal.correctiveActions
         reports[index].inspectorFeedback = legal.recommendation
+    }
+
+    func loadFromBackend() async {
+        do {
+            let backendReports = try await backend.fetchReportsList().map { item in
+                FleetReportRecord(
+                    id: UUID(),
+                    sourceInspectionID: nil,
+                    title: "Inspection Report \(item.fleetSerial)",
+                    fleetID: item.fleetSerial,
+                    inspectionDate: item.inspectionDate,
+                    status: .submitted,
+                    pdfFileName: item.reportURL,
+                    inspectorFeedback: "",
+                    legalSummary: "",
+                    legalWitnessName: "",
+                    legalCorrectiveActions: ""
+                )
+            }
+            let drafts = reports.filter { $0.status == .draft }
+            reports = drafts + backendReports
+        } catch {
+            // Keep local data if backend load fails.
+        }
     }
 
     private static func formatDate(_ date: Date) -> String {
@@ -457,6 +482,11 @@ struct ContentView: View {
                 )
             }
         }
+        .task(id: profileStore.profile.fullName + profileStore.profile.region) {
+            viewModel.setInspectorProfile(name: profileStore.profile.fullName, region: profileStore.profile.region)
+            await viewModel.loadIfNeeded()
+            await reportStore.loadFromBackend()
+        }
     }
 }
 
@@ -480,6 +510,25 @@ private struct FleetHomeView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
+                if viewModel.isLoading {
+                    HStack(spacing: 10) {
+                        ProgressView().tint(CATTheme.catYellow)
+                        Text("Loading dashboard...")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(CATTheme.body)
+                    }
+                    .padding(14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(CATTheme.card)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .stroke(CATTheme.cardBorder, lineWidth: 1)
+                            )
+                    )
+                }
+
                 if viewModel.connectionOffline {
                     OfflineBanner()
                 }
@@ -511,6 +560,11 @@ private struct FleetHomeView: View {
                         }
                     }
                 }
+                if !viewModel.isLoading && viewModel.todaysInspections.isEmpty {
+                    Text("No backend inspections available right now.")
+                        .font(.caption)
+                        .foregroundStyle(CATTheme.muted)
+                }
 
                 ActionCardButton(title: "Open Inspections Screen", icon: "arrow.right.circle.fill", foreground: CATTheme.catBlack, background: AnyShapeStyle(CATTheme.headerGradient)) {
                     onGoToInspections()
@@ -528,6 +582,9 @@ private struct FleetHomeView: View {
             .padding(.top, 8)
         }
         .background(CATTheme.background.ignoresSafeArea())
+        .refreshable {
+            await viewModel.refresh()
+        }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .principal) {
@@ -1312,6 +1369,23 @@ private struct InspectionsQueueScreen: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
+                if viewModel.isLoading {
+                    HStack(spacing: 8) {
+                        ProgressView().tint(CATTheme.catYellow)
+                        Text("Loading inspections...")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(CATTheme.body)
+                    }
+                    .padding(12)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(CATTheme.card)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .stroke(CATTheme.cardBorder, lineWidth: 1)
+                            )
+                    )
+                }
                 SearchBarButton(title: "Search Fleet / Inspection / Report") {
                     onOpenSearch()
                 }
@@ -1464,6 +1538,9 @@ private struct ReportsScreen: View {
         .navigationTitle("Reports")
         .toolbarBackground(CATTheme.catCharcoal, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
+        .refreshable {
+            await reportStore.loadFromBackend()
+        }
         .sheet(item: $selectedReport) { report in
             NavigationStack {
                 ReportDetailScreen(
@@ -1694,7 +1771,8 @@ private struct StructuredReportComposerView: View {
                     taskNumber: task.taskNumber,
                     sourceTitle: task.title,
                     summaryTitle: Self.prepopulateSummary(title: task.title, detail: task.detail),
-                    status: task.completed ? .pass : .monitor
+                    status: task.walkthroughStatus,
+                    taskFeedback: task.feedbackText
                 )
             }
         _taskInputs = State(initialValue: seededTasks)
@@ -1722,10 +1800,21 @@ private struct StructuredReportComposerView: View {
                 CreateSectionCard(title: "Task Status Matrix", icon: "list.bullet.clipboard.fill") {
                     VStack(spacing: 10) {
                         ForEach(taskInputs.indices, id: \.self) { index in
+                            let matchingTask = inspection.tasks.first(where: { $0.id == taskInputs[index].id })
                             VStack(alignment: .leading, spacing: 8) {
                                 Text("Task \(taskInputs[index].taskNumber)")
                                     .font(.caption.weight(.bold))
                                     .foregroundStyle(CATTheme.muted)
+                                if let matchingTask, !matchingTask.photoFileNames.isEmpty {
+                                    ScrollView(.horizontal, showsIndicators: false) {
+                                        HStack(spacing: 8) {
+                                            ForEach(matchingTask.photoFileNames, id: \.self) { photo in
+                                                TaskPhotoThumb(fileName: photo)
+                                            }
+                                        }
+                                    }
+                                    .frame(height: 56)
+                                }
                                 CATInputField(
                                     title: "Summarized Title",
                                     text: Binding(
@@ -1745,6 +1834,14 @@ private struct StructuredReportComposerView: View {
                                     }
                                 }
                                 .pickerStyle(.segmented)
+                                CATTextEditorField(
+                                    title: "Task Feedback",
+                                    text: Binding(
+                                        get: { taskInputs[index].taskFeedback },
+                                        set: { taskInputs[index].taskFeedback = $0 }
+                                    ),
+                                    minHeight: 54
+                                )
                             }
                             .padding(10)
                             .background(
@@ -2075,23 +2172,53 @@ private struct TodayInspectionTile: View {
 private struct PDFDocumentView: UIViewRepresentable {
     let url: URL
 
+    final class Coordinator {
+        var lastURL: URL?
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
     func makeUIView(context: Context) -> PDFView {
         let pdfView = PDFView()
         pdfView.autoScales = true
         pdfView.displayMode = .singlePageContinuous
         pdfView.displayDirection = .vertical
-        pdfView.document = PDFDocument(url: url)
+        loadPDF(into: pdfView, context: context)
         return pdfView
     }
 
     func updateUIView(_ uiView: PDFView, context: Context) {
-        if uiView.document == nil {
-            uiView.document = PDFDocument(url: url)
+        if context.coordinator.lastURL != url {
+            loadPDF(into: uiView, context: context)
         }
+    }
+
+    private func loadPDF(into view: PDFView, context: Context) {
+        context.coordinator.lastURL = url
+        if url.isFileURL {
+            view.document = PDFDocument(url: url)
+            return
+        }
+        URLSession.shared.dataTask(with: url) { data, _, _ in
+            guard context.coordinator.lastURL == url, let data else { return }
+            let document = PDFDocument(data: data)
+            DispatchQueue.main.async {
+                if context.coordinator.lastURL == url {
+                    view.document = document
+                }
+            }
+        }.resume()
     }
 }
 
 private func reportPDFURL(fileName: String) -> URL? {
+    if let directURL = URL(string: fileName),
+       let scheme = directURL.scheme?.lowercased(),
+       scheme == "http" || scheme == "https" || scheme == "file" {
+        return directURL
+    }
     if let bundleURL = Bundle.main.url(forResource: fileName, withExtension: nil) {
         return bundleURL
     }
@@ -2629,9 +2756,11 @@ private struct FleetInspectionWorkflowView: View {
     @State private var walkAroundActive = false
     @State private var selectedTaskID: UUID?
     @State private var feedbackText = ""
+    @State private var selectedWalkthroughStatus: TaskReportStatus = .normal
     @State private var capturedPhotoFileNames: [String] = []
     @State private var selectedPreviewPhotoFileName: String?
     @State private var sendStatusText = ""
+    @State private var isTaskSyncing = false
     @State private var showReportComposer = false
 
     private var record: FleetInspectionRecord? {
@@ -2881,8 +3010,8 @@ private struct FleetInspectionWorkflowView: View {
                                     .fill(selectedTaskID == task.id ? AnyShapeStyle(CATTheme.headerGradient) : AnyShapeStyle(CATTheme.cardElevated))
                             )
                     }
-                    .disabled(voiceService.isRecording)
-                    .opacity(voiceService.isRecording ? 0.5 : 1.0)
+                    .disabled(voiceService.isRecording || isTaskSyncing)
+                    .opacity((voiceService.isRecording || isTaskSyncing) ? 0.5 : 1.0)
                 }
             }
         }
@@ -2930,6 +3059,7 @@ private struct FleetInspectionWorkflowView: View {
                         .background(CATTheme.headerGradient)
                         .clipShape(RoundedRectangle(cornerRadius: 10))
                 }
+                .disabled(isTaskSyncing)
             } else {
                 HStack(spacing: 8) {
                     Button {
@@ -2946,8 +3076,8 @@ private struct FleetInspectionWorkflowView: View {
                     .foregroundStyle(CATTheme.catBlack)
                     .background(CATTheme.headerGradient)
                     .clipShape(RoundedRectangle(cornerRadius: 10))
-                    .disabled(capturedPhotoFileNames.count >= 5)
-                    .opacity(capturedPhotoFileNames.count >= 5 ? 0.5 : 1.0)
+                    .disabled(capturedPhotoFileNames.count >= 5 || isTaskSyncing)
+                    .opacity((capturedPhotoFileNames.count >= 5 || isTaskSyncing) ? 0.5 : 1.0)
 
                     Button {
                         if voiceService.isRecording {
@@ -2972,16 +3102,29 @@ private struct FleetInspectionWorkflowView: View {
                         RoundedRectangle(cornerRadius: 10)
                             .stroke(CATTheme.cardBorder, lineWidth: 1)
                     )
+                    .disabled(isTaskSyncing)
+                    .opacity(isTaskSyncing ? 0.5 : 1.0)
                 }
 
                 if !capturedPhotoFileNames.isEmpty {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
                             ForEach(capturedPhotoFileNames, id: \.self) { fileName in
-                                Button {
-                                    selectedPreviewPhotoFileName = fileName
-                                } label: {
-                                    TaskPhotoThumb(fileName: fileName)
+                                ZStack(alignment: .topTrailing) {
+                                    Button {
+                                        selectedPreviewPhotoFileName = fileName
+                                    } label: {
+                                        TaskPhotoThumb(fileName: fileName)
+                                    }
+                                    Button {
+                                        capturedPhotoFileNames.removeAll { $0 == fileName }
+                                    } label: {
+                                        Image(systemName: "xmark.circle.fill")
+                                            .font(.caption.bold())
+                                            .foregroundStyle(CATTheme.critical)
+                                            .background(Circle().fill(CATTheme.card))
+                                    }
+                                    .offset(x: 6, y: -6)
                                 }
                             }
                         }
@@ -2990,8 +3133,15 @@ private struct FleetInspectionWorkflowView: View {
                 }
 
                 CATTextEditorField(title: "Task Feedback", text: $feedbackText, minHeight: 50)
+                Picker("Task Status", selection: $selectedWalkthroughStatus) {
+                    ForEach(TaskReportStatus.allCases, id: \.self) { state in
+                        Text(state.rawValue).tag(state)
+                    }
+                }
+                .pickerStyle(.segmented)
 
                 Button {
+                    isTaskSyncing = true
                     Task {
                         let audioFileName = await voiceService.stopAndStream(
                             inspectionID: inspectionID,
@@ -3005,22 +3155,33 @@ private struct FleetInspectionWorkflowView: View {
                             taskID: task.id,
                             feedbackText: feedbackText,
                             photoFileNames: capturedPhotoFileNames,
-                            audioFileName: audioFileName
+                            audioFileName: audioFileName,
+                            walkthroughStatus: selectedWalkthroughStatus
                         )
                         appLoadingMessage = nil
+                        isTaskSyncing = false
                         sendStatusText = "Task \(task.taskNumber): \(syncStatus)"
                         if let nextTaskID = nextTaskID(after: task.id) {
                             selectedTaskID = nextTaskID
                         }
                     }
                 } label: {
-                    Label("Send Feedback", systemImage: "paperplane.fill")
-                        .font(.subheadline.weight(.bold))
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                        .foregroundStyle(CATTheme.catBlack)
-                        .background(CATTheme.headerGradient)
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                    HStack(spacing: 8) {
+                        if isTaskSyncing {
+                            ProgressView().tint(CATTheme.catBlack)
+                        } else {
+                            Image(systemName: "paperplane.fill")
+                        }
+                        Text(isTaskSyncing ? "Uploading..." : "Send Feedback")
+                            .font(.subheadline.weight(.bold))
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .foregroundStyle(CATTheme.catBlack)
+                    .background(CATTheme.headerGradient)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
                 }
+                .disabled(isTaskSyncing)
+                .opacity(isTaskSyncing ? 0.55 : 1.0)
             }
         }
         .padding(10)
@@ -3033,6 +3194,7 @@ private struct FleetInspectionWorkflowView: View {
     private func syncInputsWithCurrentTask() {
         guard let task = currentTask else { return }
         feedbackText = task.feedbackText
+        selectedWalkthroughStatus = task.walkthroughStatus
         capturedPhotoFileNames = task.photoFileNames
         selectedPreviewPhotoFileName = nil
     }
