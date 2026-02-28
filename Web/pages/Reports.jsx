@@ -1,26 +1,6 @@
 import { useEffect, useState } from 'react'
-import { supabase } from '../src/supabase'
 
-const TEMPLATE_CARDS = [
-  {
-    id: 'T-1001',
-    inspection_id: 'template-inspection',
-    title: 'Hydraulic Pressure Inspection',
-    report_pdf: 'https://example.com/reports/hydraulic-pressure-inspection.pdf',
-    created_at: '2026-02-01T10:15:00.000Z',
-    pdf_created: '2026-02-01T10:15:00.000Z',
-    isTemplate: true,
-  },
-  {
-    id: 'T-1002',
-    inspection_id: 'template-inspection',
-    title: 'Engine Performance Audit',
-    report_pdf: 'https://example.com/reports/engine-performance-audit.pdf',
-    created_at: '2026-02-10T14:40:00.000Z',
-    pdf_created: '2026-02-10T14:40:00.000Z',
-    isTemplate: true,
-  },
-]
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000').replace(/\/$/, '')
 
 export default function Reports() {
   const [reports, setReports] = useState([])
@@ -36,45 +16,22 @@ export default function Reports() {
     setLoading(true)
     setError(null)
 
-    const { data, error } = await supabase
-      .from('report')
-      .select('id, inspection_id, report_pdf, pdf_created, created_at')
-      .order('created_at', { ascending: false })
-
-    if (error) {
+    try {
+      const response = await fetch(`${API_BASE_URL}/reports`)
+      if (!response.ok) throw new Error('Request failed')
+      const payload = await response.json()
+      setReports(payload.data || [])
+    } catch {
       setError('Failed to load reports. Check your connection and try again.')
-    } else {
-      const mapped = (data || []).map(row => ({
-        ...row,
-        title: `Inspection ${row.inspection_id ?? '—'}`,
-      }))
-      setReports(mapped)
     }
 
     setLoading(false)
   }
 
   async function handleDownload(report) {
-    if (!report?.report_pdf) return
-
-    try {
-      const response = await fetch(report.report_pdf)
-      if (!response.ok) {
-        throw new Error('Download failed')
-      }
-
-      const blob = await response.blob()
-      const objectUrl = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = objectUrl
-      link.download = `${report.title || `report-${report.id}`}.pdf`
-      document.body.appendChild(link)
-      link.click()
-      link.remove()
-      URL.revokeObjectURL(objectUrl)
-    } catch {
-      window.open(report.report_pdf, '_blank', 'noopener,noreferrer')
-    }
+    if (!report?.pdf_link) return
+    const url = `${API_BASE_URL}${report.pdf_link}`
+    window.open(url, '_blank', 'noopener,noreferrer')
   }
 
   function formatDate(value) {
@@ -89,12 +46,11 @@ export default function Reports() {
   }
 
   const query = search.trim().toLowerCase()
-  const liveReports = reports.map(report => ({ ...report, isTemplate: false }))
-  const allReports = [...TEMPLATE_CARDS, ...liveReports]
-  const filtered = allReports.filter(report =>
-    String(report.id ?? '').toLowerCase().includes(query) ||
+  const filtered = reports.filter(report =>
+    String(report.report_id ?? '').toLowerCase().includes(query) ||
     String(report.inspection_id ?? '').toLowerCase().includes(query) ||
-    String(report.title ?? '').toLowerCase().includes(query)
+    String(report.title ?? '').toLowerCase().includes(query) ||
+    String(report.created_by ?? '').toLowerCase().includes(query)
   )
 
   return (
@@ -124,7 +80,7 @@ export default function Reports() {
             <span className="search-icon">⌕</span>
             <input
               className="report-search-input"
-              placeholder="Search by report id, inspection id, or title…"
+              placeholder="Search by report id, inspection id, creator, or title…"
               value={search}
               onChange={event => setSearch(event.target.value)}
             />
@@ -133,54 +89,48 @@ export default function Reports() {
         </div>
 
         <div className="card-body">
-          <div className="card-title" style={{ marginBottom: 10 }}>Reports Gallery</div>
+          <div className="card-title" style={{ marginBottom: 10 }}>Reports</div>
 
           {loading ? (
-            <div className="grid-3">
-              {[...Array(6)].map((_, index) => (
-                <div key={index} className="report-card">
-                  <div className="skeleton" style={{ height: 12, width: 90, marginBottom: 10 }} />
-                  <div className="skeleton" style={{ height: 18, width: '60%', marginBottom: 8 }} />
-                  <div className="skeleton" style={{ height: 22, width: '75%', marginBottom: 8 }} />
-                  <div className="skeleton" style={{ height: 14, width: '100%', marginBottom: 6 }} />
-                  <div className="skeleton" style={{ height: 14, width: '85%', marginBottom: 14 }} />
-                  <div className="report-card-actions">
-                    <div className="skeleton" style={{ height: 36, width: 120 }} />
-                  </div>
-                </div>
+            <div style={{ padding: 16 }}>
+              {[...Array(5)].map((_, index) => (
+                <div key={index} className="skeleton skeleton-row" style={{ marginBottom: 6 }} />
               ))}
             </div>
           ) : filtered.length === 0 ? (
             <div className="empty-state">
               <div className="empty-state-icon">◻</div>
               <div className="empty-state-title">No reports found</div>
-              <div className="empty-state-desc">Try searching by a different report ID, inspection ID, or title</div>
+              <div className="empty-state-desc">Try searching by a different report ID, inspection ID, creator, or title</div>
             </div>
           ) : (
-            <div className="grid-3">
-              {filtered.map(report => (
-                <div key={`${report.isTemplate ? 'template' : 'live'}-${report.id}`} className={`report-card${report.isTemplate ? ' report-card-template' : ''}`}>
-                  <div className="mono report-card-id">ID: {report.id ?? '—'}</div>
-                  <div className="mono report-card-id" style={{ marginTop: -2 }}>Inspection: {report.inspection_id || '—'}</div>
-                  {report.isTemplate && (
-                    <div className="report-card-top" style={{ marginBottom: 8 }}>
-                      <span className="badge badge-info">Template</span>
-                    </div>
-                  )}
-                  <div className="report-card-title">{report.title || `Report ${report.id}`}</div>
-                  <div className="mono" style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>
-                    Created: {formatDate(report.pdf_created || report.created_at)}
-                  </div>
-                  <div className="report-card-url">
-                    {report.report_pdf || 'Generating PDF…'}
-                  </div>
-                  <div className="report-card-actions">
-                    <button className="btn btn-sm btn-pdf" onClick={() => handleDownload(report)} disabled={!report.report_pdf}>
-                      Download PDF
-                    </button>
-                  </div>
-                </div>
-              ))}
+            <div style={{ overflowX: 'auto' }}>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Inspection ID</th>
+                    <th>Created At</th>
+                    <th>Created By</th>
+                    <th>Title</th>
+                    <th>PDF</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map(report => (
+                    <tr key={`report-${report.report_id || report.inspection_id || report.created_at}`}>
+                      <td className="mono" style={{ fontWeight: 500 }}>{report.inspection_id || '—'}</td>
+                      <td className="mono" style={{ color: 'var(--text-secondary)', fontSize: 12 }}>{formatDate(report.created_at)}</td>
+                      <td>{report.created_by || '—'}</td>
+                      <td>{report.title || '—'}</td>
+                      <td>
+                        <button className="btn btn-sm btn-pdf" onClick={() => handleDownload(report)} disabled={!report.pdf_link}>
+                          Open PDF
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
         </div>

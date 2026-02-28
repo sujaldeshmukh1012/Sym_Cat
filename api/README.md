@@ -42,6 +42,7 @@ The API includes the following routers:
 - `/inspections` - Inspection data
 - `/inventory` - Inventory management
 - `/orders` - Order management
+- `/reports` - Report listing and PDF retrieval from S3
 
 ## Environment Variables
 
@@ -50,6 +51,12 @@ Create a `.env` file in the project root with your Supabase credentials:
 ```
 SUPABASE_URL=your_supabase_url
 SUPABASE_KEY=your_supabase_key
+SUPABASE_BUCKET_NAME=your_bucket_name
+SUPABASE_S3_ENDPOINT=your_s3_endpoint
+SUPABASE_S3_ACCESS_KEY=your_s3_access_key
+SUPABASE_S3_SECRET_KEY=your_s3_secret_key
+SUPABASE_S3_REGION=your_s3_region
+CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 ```
 
 ## Python 3.14 Compatibility Note
