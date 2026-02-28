@@ -7,7 +7,7 @@ import Foundation
 
 @MainActor
 final class DashboardViewModel: ObservableObject {
-    @Published var inspectorName: String = "Alex Rivera"
+    @Published var inspectorName: String = "Bhanu Reddy"
     @Published var inspectorRegion: String = "Region C - South Yard"
     @Published var connectionOffline = false
     @Published var kpis: [KPIItem] = []
