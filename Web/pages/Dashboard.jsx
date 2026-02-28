@@ -17,7 +17,7 @@ export default function Dashboard({ setActivePage }) {
     setLoading(true)
     setDashboardError('')
     const [inv, parts, logs, reports, recentLogsRes] = await Promise.all([
-      supabase.from('inventory').select('id, quantity', { count: 'exact' }),
+      supabase.from('inventory').select('id, user_id, quantity, created_at', { count: 'exact' }),
       supabase.from('machine_specs').select('id', { count: 'exact' }),
       supabase.from('logs').select('id', { count: 'exact' }),
       supabase.from('reports').select('id', { count: 'exact' }),
@@ -45,8 +45,32 @@ export default function Dashboard({ setActivePage }) {
       return 0
     }
 
+    const inventoryCount = safeCount(inv)
+
+    if (import.meta.env.DEV) {
+      console.group('[Dashboard] Supabase query diagnostics')
+      console.log('inventory', {
+        error: inv.error?.message || null,
+        count: inv.count,
+        rowsVisible: Array.isArray(inv.data) ? inv.data.length : 0,
+        sample: Array.isArray(inv.data) ? inv.data.slice(0, 3) : [],
+      })
+      console.log('machine_specs', { error: parts.error?.message || null, count: parts.count })
+      console.log('logs', { error: logs.error?.message || null, count: logs.count })
+      console.log('reports', { error: reports.error?.message || null, count: reports.count })
+      console.log('recentLogs', {
+        error: recentLogsRes.error?.message || null,
+        rows: Array.isArray(recentLogsRes.data) ? recentLogsRes.data.length : 0,
+      })
+      console.log('lowStock', {
+        error: lowStockRes.error?.message || null,
+        rows: Array.isArray(lowStockRes.data) ? lowStockRes.data.length : 0,
+      })
+      console.groupEnd()
+    }
+
     setStats({
-      inventory: safeCount(inv),
+      inventory: inventoryCount,
       parts: safeCount(parts),
       logs: safeCount(logs),
       reports: safeCount(reports),
