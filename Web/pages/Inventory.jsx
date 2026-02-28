@@ -1,18 +1,11 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../src/supabase'
 
-const EMPTY_FORM = { name: '', part_number: '', brand: '', quantity: '' }
-
 export default function Inventory() {
   const [items, setItems] = useState([])
   const [latestStatusByInventoryId, setLatestStatusByInventoryId] = useState({})
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
-  const [showModal, setShowModal] = useState(false)
-  const [editItem, setEditItem] = useState(null)
-  const [form, setForm] = useState(EMPTY_FORM)
-  const [saving, setSaving] = useState(false)
-  const [deleteTarget, setDeleteTarget] = useState(null)
   const [syncStatus, setSyncStatus] = useState('synced')
   const [error, setError] = useState(null)
 
@@ -51,54 +44,6 @@ export default function Inventory() {
     }
 
     setLoading(false)
-  }
-
-  function openEdit(item) {
-    setEditItem(item)
-    setForm({ name: item.name, part_number: item.part_number || '', brand: item.brand, quantity: item.quantity })
-    setShowModal(true)
-  }
-
-  async function handleSave() {
-    if (!form.name || !form.part_number || form.quantity === '') return
-    setSaving(true)
-    setSyncStatus('pending')
-    const payload = {
-      name: form.name,
-      part_number: form.part_number,
-      brand: form.brand,
-      quantity: Number(form.quantity),
-    }
-
-    if (!editItem) {
-      setSaving(false)
-      setSyncStatus('failed')
-      return
-    }
-
-    const { error } = await supabase.from('inventory').update(payload).eq('id', editItem.id)
-
-    if (error) {
-      setSyncStatus('failed')
-    } else {
-      setSyncStatus('synced')
-      setShowModal(false)
-      fetchItems()
-    }
-    setSaving(false)
-  }
-
-  async function handleDelete() {
-    if (!deleteTarget) return
-    setSyncStatus('pending')
-    const { error } = await supabase.from('inventory').delete().eq('id', deleteTarget.id)
-    if (!error) {
-      setSyncStatus('synced')
-      fetchItems()
-    } else {
-      setSyncStatus('failed')
-    }
-    setDeleteTarget(null)
   }
 
   const filtered = items.filter(i =>
@@ -188,21 +133,20 @@ export default function Inventory() {
                 <th>Quantity</th>
                 <th>Created At</th>
                 <th>Status</th>
-                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 [...Array(6)].map((_, i) => (
                   <tr key={i}>
-                    {[...Array(9)].map((_, j) => (
+                    {[...Array(8)].map((_, j) => (
                       <td key={j}><div className="skeleton" style={{ height: 16, width: j === 1 || j === 2 || j === 3 ? 140 : 80 }} /></td>
                     ))}
                   </tr>
                 ))
               ) : filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={9}>
+                  <td colSpan={8}>
                     <div className="empty-state">
                       <div className="empty-state-icon">▦</div>
                       <div className="empty-state-title">No inventory items found</div>
@@ -221,12 +165,6 @@ export default function Inventory() {
                     <td className="mono">{item.quantity ?? '—'}</td>
                     <td className="mono" style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{formatCreatedAt(item.created_at)}</td>
                     <td>{statusBadgeFromLog(item.id)}</td>
-                    <td>
-                      <div style={{ display: 'flex', gap: 8 }}>
-                        <button className="btn btn-secondary btn-sm" onClick={() => openEdit(item)}>Edit</button>
-                        <button className="btn btn-danger btn-sm" onClick={() => setDeleteTarget(item)}>Delete</button>
-                      </div>
-                    </td>
                   </tr>
                 ))
               )}
@@ -234,85 +172,6 @@ export default function Inventory() {
           </table>
         </div>
       </div>
-
-      {/* Add / Edit Modal */}
-      {showModal && (
-        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setShowModal(false)}>
-          <div className="modal">
-            <div className="modal-header">
-              <div className="modal-title">Edit Inventory Item</div>
-              <button className="modal-close" onClick={() => setShowModal(false)}>✕</button>
-            </div>
-            <div className="modal-body">
-              <div className="form-group">
-                <label>Item Name *</label>
-                <input
-                  placeholder="e.g. Bearing Assembly"
-                  value={form.name}
-                  onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-                />
-              </div>
-              <div className="form-group">
-                <label>Part Number *</label>
-                <input
-                  placeholder="e.g. BRG-4820"
-                  value={form.part_number}
-                  onChange={e => setForm(f => ({ ...f, part_number: e.target.value }))}
-                />
-              </div>
-              <div className="form-group">
-                <label>Brand</label>
-                <input
-                  placeholder="e.g. SKF"
-                  value={form.brand}
-                  onChange={e => setForm(f => ({ ...f, brand: e.target.value }))}
-                />
-              </div>
-              <div className="form-group">
-                <label>Quantity *</label>
-                <input
-                  type="number"
-                  min="0"
-                  placeholder="0"
-                  value={form.quantity}
-                  onChange={e => setForm(f => ({ ...f, quantity: e.target.value }))}
-                />
-              </div>
-            </div>
-            <div className="modal-footer">
-              <button className="btn btn-secondary" onClick={() => setShowModal(false)}>Cancel</button>
-              <button className="btn btn-primary" onClick={handleSave} disabled={saving || !form.name || !form.part_number || form.quantity === ''}>
-                {saving ? 'Saving…' : 'Save Changes'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Delete Confirmation Modal */}
-      {deleteTarget && (
-        <div className="modal-overlay">
-          <div className="modal">
-            <div className="modal-header">
-              <div className="modal-title" style={{ color: 'var(--critical)' }}>✕ Confirm Deletion</div>
-            </div>
-            <div className="modal-body">
-              <div className="alert-banner critical" style={{ marginBottom: 16 }}>
-                <div>
-                  <div className="alert-banner-title">This action cannot be undone</div>
-                  <div className="alert-banner-body">
-                    You are about to permanently delete <strong>{deleteTarget.name}</strong> ({deleteTarget.part_number || 'No part number'}) from inventory.
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div className="modal-footer">
-              <button className="btn btn-secondary" onClick={() => setDeleteTarget(null)}>Cancel</button>
-              <button className="btn btn-danger" onClick={handleDelete}>Delete Permanently</button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
