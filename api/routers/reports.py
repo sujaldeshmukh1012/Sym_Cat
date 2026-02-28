@@ -6,29 +6,26 @@ from typing import Any
 import boto3
 from botocore.config import Config
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
-from jinja2 import Environment, FileSystemLoader
 from pydantic import BaseModel
-from xhtml2pdf import pisa
 
 from api.routers import supabase
+from api.pdf_generator import generate_report_pdf_bytes
 
 router = APIRouter(prefix="/reports", tags=["Reports"])
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-TEMPLATE_DIR = os.path.join(BASE_DIR, "templates")
-
-template_env = Environment(loader=FileSystemLoader(TEMPLATE_DIR))
-template = template_env.get_template("report_template.html")
-
 BUCKET_NAME = os.getenv("SUPABASE_BUCKET_NAME")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
+if not BUCKET_NAME:
+    BUCKET_NAME = "inspection_key"
+if not SUPABASE_URL:
+    SUPABASE_URL = "https://axxxkhxsuigimqragicw.supabase.co"
 
 s3_client = boto3.client(
     "s3",
-    endpoint_url=os.getenv("SUPABASE_S3_ENDPOINT"),
-    aws_access_key_id=os.getenv("SUPABASE_S3_ACCESS_KEY"),
-    aws_secret_access_key=os.getenv("SUPABASE_S3_SECRET_KEY"),
-    region_name=os.getenv("SUPABASE_S3_REGION"),
+    endpoint_url=os.getenv("SUPABASE_S3_ENDPOINT") or "https://axxxkhxsuigimqragicw.storage.supabase.co/storage/v1/s3",
+    aws_access_key_id=os.getenv("SUPABASE_S3_ACCESS_KEY") or "4e5e5c5168fc5b949f648aa5024489ae",
+    aws_secret_access_key=os.getenv("SUPABASE_S3_SECRET_KEY") or "454af5f5895e0fee2a9e9052cd55be3064dc84b80a09c18ff6d728c470fc9ac1",
+    region_name=os.getenv("SUPABASE_S3_REGION") or "us-west-2",
     config=Config(s3={"addressing_style": "path"}),
 )
 
@@ -51,12 +48,10 @@ def _build_public_url(object_key: str) -> str:
 
 
 def _create_pdf_bytes(report_data: dict[str, Any]) -> bytes:
-    html_out = template.render(**report_data)
-    buffer = io.BytesIO()
-    pisa_status = pisa.CreatePDF(html_out, dest=buffer)
-    if pisa_status.err:
-        raise HTTPException(status_code=500, detail="Failed to generate report PDF")
-    return buffer.getvalue()
+    try:
+        return generate_report_pdf_bytes(report_data)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to generate report PDF: {exc}")
 
 
 def _load_inspection_context(inspection_id: int) -> dict[str, str]:

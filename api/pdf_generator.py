@@ -1,4 +1,5 @@
 import os
+import io
 from datetime import datetime
 from typing import Any
 
@@ -51,11 +52,16 @@ DEFAULT_REPORT_FIELDS = {
 
 
 def get_supabase_client() -> Client | None:
-    supabase_url = os.getenv("SUPABASE_URL") or os.getenv("VITE_SUPABASE_URL")
+    supabase_url = (
+        os.getenv("SUPABASE_URL")
+        or os.getenv("VITE_SUPABASE_URL")
+        or "https://axxxkhxsuigimqragicw.supabase.co"
+    )
     supabase_key = (
         os.getenv("SUPABASE_KEY")
         or os.getenv("SUPABASE_ANON_KEY")
         or os.getenv("VITE_SUPABASE_ANON_KEY")
+        or "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF4eHhraHhzdWlnaW1xcmFnaWN3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MjI1NzYyMywiZXhwIjoyMDg3ODMzNjIzfQ.8xTJC_hCRGdpv3J58UgzDe7BQiWaL5YR-jM7twPvsIQ"
     )
 
     if not supabase_url or not supabase_key:
@@ -182,6 +188,15 @@ template = template_env.get_template("report_template.html")
 
 html_out = template.render(**report_data)
 output_filename = "final_inspection_report.pdf"
+
+
+def generate_report_pdf_bytes(report_payload: dict[str, Any]) -> bytes:
+    rendered_html = template.render(**report_payload)
+    buffer = io.BytesIO()
+    pisa_status = pisa.CreatePDF(rendered_html, dest=buffer)
+    if pisa_status.err:
+        raise RuntimeError("Failed to generate report PDF")
+    return buffer.getvalue()
 
 
 def convert_html_to_pdf(source_html, output_path):
