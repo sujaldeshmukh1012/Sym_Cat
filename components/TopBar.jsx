@@ -1,7 +1,7 @@
 const PAGE_TITLES = {
   dashboard: 'Dashboard Overview',
   inventory: 'Inventory Management',
-  parts: 'Machine Parts',
+  parts: 'Machine Specs',
   logs: 'Inspector Logs',
   reports: 'Reports',
 }

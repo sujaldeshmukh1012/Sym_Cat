@@ -499,6 +499,12 @@ input:focus, select:focus, textarea:focus {
   font-size: 14px;
 }
 
+.search-bar input.report-search-input {
+  height: 100%;
+  line-height: 1.6;
+  font-size: 15px;
+}
+
 .search-icon { color: var(--text-muted); font-size: 15px; }
 
 /* ─── MODAL ─── */

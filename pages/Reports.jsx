@@ -4,13 +4,19 @@ import { supabase } from '../src/supabase'
 const TEMPLATE_CARDS = [
   {
     id: 'T-1001',
+    user_id: 'template-user',
     title: 'Hydraulic Pressure Inspection',
-    url: 'https://example.com/reports/hydraulic-pressure-inspection.pdf',
+    public_url: 'https://example.com/reports/hydraulic-pressure-inspection.pdf',
+    created_at: '2026-02-01T10:15:00.000Z',
+    isTemplate: true,
   },
   {
     id: 'T-1002',
+    user_id: 'template-user',
     title: 'Engine Performance Audit',
-    url: 'https://example.com/reports/engine-performance-audit.pdf',
+    public_url: 'https://example.com/reports/engine-performance-audit.pdf',
+    created_at: '2026-02-10T14:40:00.000Z',
+    isTemplate: true,
   },
 ]
 
@@ -30,8 +36,8 @@ export default function Reports() {
 
     const { data, error } = await supabase
       .from('reports')
-      .select('id, url')
-      .order('id', { ascending: false })
+      .select('id, user_id, title, public_url, created_at')
+      .order('created_at', { ascending: false })
 
     if (error) {
       setError('Failed to load reports. Check your connection and try again.')
@@ -43,10 +49,10 @@ export default function Reports() {
   }
 
   async function handleDownload(report) {
-    if (!report?.url) return
+    if (!report?.public_url) return
 
     try {
-      const response = await fetch(report.url)
+      const response = await fetch(report.public_url)
       if (!response.ok) {
         throw new Error('Download failed')
       }
@@ -55,52 +61,35 @@ export default function Reports() {
       const objectUrl = URL.createObjectURL(blob)
       const link = document.createElement('a')
       link.href = objectUrl
-      link.download = `report-${report.id}.pdf`
+      link.download = `${report.title || `report-${report.id}`}.pdf`
       document.body.appendChild(link)
       link.click()
       link.remove()
       URL.revokeObjectURL(objectUrl)
     } catch {
-      window.open(report.url, '_blank', 'noopener,noreferrer')
+      window.open(report.public_url, '_blank', 'noopener,noreferrer')
     }
   }
 
-  function extractTitle(report) {
-    if (!report?.url) return `Report ${report?.id ?? ''}`.trim()
-
-    try {
-      const pathname = new URL(report.url).pathname
-      const fileName = pathname.split('/').pop() || ''
-      const title = fileName
-        .replace(/\.pdf$/i, '')
-        .replace(/[-_]+/g, ' ')
-        .trim()
-      return title
-        ? title.replace(/\b\w/g, char => char.toUpperCase())
-        : `Report ${report.id}`
-    } catch {
-      return `Report ${report?.id ?? ''}`.trim()
-    }
+  function formatDate(value) {
+    if (!value) return '—'
+    return new Date(value).toLocaleString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
   }
 
   const query = search.trim().toLowerCase()
-  const reportsWithTitle = reports.map(report => ({
-    ...report,
-    title: extractTitle(report),
-  }))
-  const filteredTemplates = TEMPLATE_CARDS.filter(report =>
+  const liveReports = reports.map(report => ({ ...report, isTemplate: false }))
+  const allReports = [...TEMPLATE_CARDS, ...liveReports]
+  const filtered = allReports.filter(report =>
     String(report.id ?? '').toLowerCase().includes(query) ||
+    String(report.user_id ?? '').toLowerCase().includes(query) ||
     String(report.title ?? '').toLowerCase().includes(query)
   )
-  const filteredLiveReports = reportsWithTitle.filter(report =>
-    String(report.id ?? '').toLowerCase().includes(query) ||
-    String(report.title ?? '').toLowerCase().includes(query)
-  )
-  const allFilteredCards = [
-    ...filteredTemplates.map(card => ({ ...card, isTemplate: true })),
-    ...filteredLiveReports.map(card => ({ ...card, isTemplate: false })),
-  ]
-  const totalResults = allFilteredCards.length
 
   return (
     <div>
@@ -128,12 +117,13 @@ export default function Reports() {
           <div className="search-bar">
             <span className="search-icon">⌕</span>
             <input
-              placeholder="Search by report id or title…"
+              className="report-search-input"
+              placeholder="Search by report id, user id, or title…"
               value={search}
               onChange={event => setSearch(event.target.value)}
             />
           </div>
-          <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>{totalResults} results</span>
+          <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>{filtered.length} results</span>
         </div>
 
         <div className="card-body">
@@ -144,6 +134,7 @@ export default function Reports() {
               {[...Array(6)].map((_, index) => (
                 <div key={index} className="report-card">
                   <div className="skeleton" style={{ height: 12, width: 90, marginBottom: 10 }} />
+                  <div className="skeleton" style={{ height: 18, width: '60%', marginBottom: 8 }} />
                   <div className="skeleton" style={{ height: 22, width: '75%', marginBottom: 8 }} />
                   <div className="skeleton" style={{ height: 14, width: '100%', marginBottom: 6 }} />
                   <div className="skeleton" style={{ height: 14, width: '85%', marginBottom: 14 }} />
@@ -153,24 +144,32 @@ export default function Reports() {
                 </div>
               ))}
             </div>
-          ) : allFilteredCards.length === 0 ? (
+          ) : filtered.length === 0 ? (
             <div className="empty-state">
               <div className="empty-state-icon">◻</div>
               <div className="empty-state-title">No reports found</div>
-              <div className="empty-state-desc">Try searching by a different ID or title</div>
+              <div className="empty-state-desc">Try searching by a different ID, user ID, or title</div>
             </div>
           ) : (
             <div className="grid-3">
-              {allFilteredCards.map(report => (
+              {filtered.map(report => (
                 <div key={`${report.isTemplate ? 'template' : 'live'}-${report.id}`} className={`report-card${report.isTemplate ? ' report-card-template' : ''}`}>
                   <div className="mono report-card-id">ID: {report.id ?? '—'}</div>
-                  {report.isTemplate && <div className="report-card-top" style={{ marginBottom: 8 }}><span className="badge badge-info">Template</span></div>}
-                  <div className="report-card-title">{report.title}</div>
+                  <div className="mono report-card-id" style={{ marginTop: -2 }}>User: {report.user_id || '—'}</div>
+                  {report.isTemplate && (
+                    <div className="report-card-top" style={{ marginBottom: 8 }}>
+                      <span className="badge badge-info">Template</span>
+                    </div>
+                  )}
+                  <div className="report-card-title">{report.title || `Report ${report.id}`}</div>
+                  <div className="mono" style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>
+                    Created: {formatDate(report.created_at)}
+                  </div>
                   <div className="report-card-url">
-                    {report.url || 'No URL available'}
+                    {report.public_url || 'No public URL available'}
                   </div>
                   <div className="report-card-actions">
-                    <button className="btn btn-sm btn-pdf" onClick={() => handleDownload(report)} disabled={!report.url}>
+                    <button className="btn btn-sm btn-pdf" onClick={() => handleDownload(report)} disabled={!report.public_url}>
                       Download PDF
                     </button>
                   </div>

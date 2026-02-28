@@ -16,10 +16,10 @@ export default function Dashboard({ setActivePage }) {
     setLoading(true)
     const [inv, parts, logs, reports, recentLogsRes] = await Promise.all([
       supabase.from('inventory').select('id, quantity', { count: 'exact' }),
-      supabase.from('machine_parts').select('id', { count: 'exact' }),
+      supabase.from('machine_specs').select('id', { count: 'exact' }),
       supabase.from('logs').select('id', { count: 'exact' }),
       supabase.from('reports').select('id', { count: 'exact' }),
-      supabase.from('logs').select('*').order('timestamp', { ascending: false }).limit(5),
+      supabase.from('logs').select('id, user_id, status, inspected_at').order('inspected_at', { ascending: false }).limit(5),
     ])
 
     const lowStockRes = await supabase
@@ -43,7 +43,7 @@ export default function Dashboard({ setActivePage }) {
 
   const kpis = [
     { label: 'Inventory Items', value: stats.inventory, icon: '▦', page: 'inventory' },
-    { label: 'Machine Parts', value: stats.parts, icon: '⚙', page: 'parts' },
+    { label: 'Machine Specs', value: stats.parts, icon: '⚙', page: 'parts' },
     { label: 'Total Log Entries', value: stats.logs, icon: '☰', page: 'logs' },
     { label: 'Total Reports', value: stats.reports, icon: '◻', page: 'reports' },
   ]
@@ -118,16 +118,22 @@ export default function Dashboard({ setActivePage }) {
               <table>
                 <thead>
                   <tr>
-                    <th>Inspector</th>
-                    <th>Timestamp</th>
+                    <th>User</th>
+                    <th>Status</th>
+                    <th>Inspected At</th>
                   </tr>
                 </thead>
                 <tbody>
                   {recentLogs.map(log => (
                     <tr key={log.id}>
-                      <td style={{ fontWeight: 500 }}>{log.inspector_name || '—'}</td>
+                      <td style={{ fontWeight: 500 }}>{log.user_id || '—'}</td>
+                      <td>
+                        <span className="badge badge-info">
+                          <span className="badge-dot" /> {log.status || '—'}
+                        </span>
+                      </td>
                       <td className="mono" style={{ color: 'var(--text-secondary)', fontSize: 12 }}>
-                        {log.timestamp ? new Date(log.timestamp).toLocaleString() : '—'}
+                        {log.inspected_at ? new Date(log.inspected_at).toLocaleString() : '—'}
                       </td>
                     </tr>
                   ))}
