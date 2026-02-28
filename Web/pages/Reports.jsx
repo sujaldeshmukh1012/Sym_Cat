@@ -1,6 +1,30 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../src/supabase'
 
+<<<<<<< HEAD
+=======
+const TEMPLATE_CARDS = [
+  {
+    id: 'T-1001',
+    inspection_id: 'template-inspection',
+    title: 'Hydraulic Pressure Inspection',
+    report_pdf: 'https://example.com/reports/hydraulic-pressure-inspection.pdf',
+    created_at: '2026-02-01T10:15:00.000Z',
+    pdf_created: '2026-02-01T10:15:00.000Z',
+    isTemplate: true,
+  },
+  {
+    id: 'T-1002',
+    inspection_id: 'template-inspection',
+    title: 'Engine Performance Audit',
+    report_pdf: 'https://example.com/reports/engine-performance-audit.pdf',
+    created_at: '2026-02-10T14:40:00.000Z',
+    pdf_created: '2026-02-10T14:40:00.000Z',
+    isTemplate: true,
+  },
+]
+
+>>>>>>> b46de7695372845cc680edb2b91d0a85c2a5d5d7
 export default function Reports() {
   const [reports, setReports] = useState([])
   const [loading, setLoading] = useState(true)
@@ -17,13 +41,21 @@ export default function Reports() {
 
     const { data, error } = await supabase
       .from('report')
+<<<<<<< HEAD
       .select('id, created_at, inspection_id, tasks, report_pdf, pdf_created')
+=======
+      .select('id, inspection_id, report_pdf, pdf_created, created_at')
+>>>>>>> b46de7695372845cc680edb2b91d0a85c2a5d5d7
       .order('created_at', { ascending: false })
 
     if (error) {
       setError('Failed to load reports. Check your connection and try again.')
     } else {
-      setReports(data || [])
+      const mapped = (data || []).map(row => ({
+        ...row,
+        title: `Inspection ${row.inspection_id ?? '—'}`,
+      }))
+      setReports(mapped)
     }
 
     setLoading(false)
@@ -67,7 +99,7 @@ export default function Reports() {
   const filtered = reports.filter(report =>
     String(report.id ?? '').toLowerCase().includes(query) ||
     String(report.inspection_id ?? '').toLowerCase().includes(query) ||
-    String(report.report_pdf ?? '').toLowerCase().includes(query)
+    String(report.title ?? '').toLowerCase().includes(query)
   )
 
   return (
@@ -97,7 +129,7 @@ export default function Reports() {
             <span className="search-icon">⌕</span>
             <input
               className="report-search-input"
-              placeholder="Search by report id, inspection id, or PDF URL…"
+              placeholder="Search by report id, inspection id, or title…"
               value={search}
               onChange={event => setSearch(event.target.value)}
             />
@@ -127,7 +159,7 @@ export default function Reports() {
             <div className="empty-state">
               <div className="empty-state-icon">◻</div>
               <div className="empty-state-title">No reports found</div>
-              <div className="empty-state-desc">Try searching by a different report ID, inspection ID, or URL</div>
+              <div className="empty-state-desc">Try searching by a different report ID, inspection ID, or title</div>
             </div>
           ) : (
             <div className="grid-3">
@@ -135,15 +167,20 @@ export default function Reports() {
                 <div key={`report-${report.id}`} className="report-card">
                   <div className="mono report-card-id">ID: {report.id ?? '—'}</div>
                   <div className="mono report-card-id" style={{ marginTop: -2 }}>Inspection: {report.inspection_id || '—'}</div>
-                  <div className="report-card-title">Report {report.id}</div>
+                  {report.isTemplate && (
+                    <div className="report-card-top" style={{ marginBottom: 8 }}>
+                      <span className="badge badge-info">Template</span>
+                    </div>
+                  )}
+                  <div className="report-card-title">{report.title || `Report ${report.id}`}</div>
                   <div className="mono" style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>
-                    Created: {formatDate(report.created_at)}
+                    Created: {formatDate(report.pdf_created || report.created_at)}
                   </div>
                   <div className="mono" style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>
                     PDF Created: {formatDate(report.pdf_created)}
                   </div>
                   <div className="report-card-url">
-                    {report.report_pdf || 'No report PDF URL available'}
+                    {report.report_pdf || 'Generating PDF…'}
                   </div>
                   <div className="report-card-actions">
                     <button className="btn btn-sm btn-pdf" onClick={() => handleDownload(report)} disabled={!report.report_pdf}>
