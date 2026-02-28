@@ -219,12 +219,12 @@ private struct InspectorProfile: Codable {
     var profileImageData: Data?
 
     static let `default` = InspectorProfile(
-        fullName: "Alex Rivera",
+        fullName: "Bhanu Reddy",
         employeeID: "CAT-84721",
-        roleTitle: "Senior Inspection Officer",
+        roleTitle: "Senior AI Inspection Officer",
         region: "Region C - South Yard",
         phone: "+1 (312) 555-0187",
-        email: "alex.rivera@catinspect.com",
+        email: "bhanu.reddy@catinspect.com",
         certificationLevel: "Level III - Heavy Fleet",
         yearsExperience: "8",
         shift: "Day Shift",
