@@ -12,7 +12,7 @@ from google.genai import types
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
-GEMINI_API_KEY  = "AIzaSyC1Tt-eaeBx9Fn4mPQ1Y24XH1fTQjSVYhQ"
+GEMINI_API_KEY  = ""
 INSPEX_BASE_URL = "https://manav-sharma-yeet--inspex-core-fastapi-app-dev.modal.run"
 API_BASE_URL    = "https://karan-flowerless-glynda.ngrok-free.dev"   # ngrok → localhost:8000
 TEST_IMAGE_PATH = "/Users/manav/Desktop/dev/projects/Sym_Cat/cat_core/data/test/BrokenRimBolt1.jpg"
