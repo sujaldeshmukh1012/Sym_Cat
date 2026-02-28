@@ -2,26 +2,26 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../src/supabase'
 
 export default function MachineParts() {
-  const [specs, setSpecs] = useState([])
+  const [parts, setParts] = useState([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [syncStatus, setSyncStatus] = useState('synced')
   const [error, setError] = useState(null)
 
-  useEffect(() => { fetchSpecs() }, [])
+  useEffect(() => { fetchParts() }, [])
 
-  async function fetchSpecs() {
+  async function fetchParts() {
     setLoading(true)
     setError(null)
     const { data, error } = await supabase
-      .from('machine_specs')
-      .select('*')
+      .from('parts')
+      .select('id, created_at, part_name, part_description, serial_number')
       .order('created_at', { ascending: false })
 
     if (error) {
-      setError('Failed to load machine specs. Check your connection and try again.')
+      setError('Failed to load machine parts. Check your connection and try again.')
     } else {
-      setSpecs(data || [])
+      setParts(data || [])
     }
     setLoading(false)
   }
@@ -38,23 +38,19 @@ export default function MachineParts() {
   }
 
   const query = search.toLowerCase()
-  const filtered = specs.filter(spec =>
-    String(spec.id ?? '').toLowerCase().includes(query) ||
-    String(spec.user_id ?? '').toLowerCase().includes(query) ||
-    String(spec.name ?? '').toLowerCase().includes(query) ||
-    String(spec.location ?? '').toLowerCase().includes(query) ||
-    String(spec.usecase ?? '').toLowerCase().includes(query) ||
-    String(spec.details ?? '').toLowerCase().includes(query) ||
-    String(spec.defect_parts ?? '').toLowerCase().includes(query) ||
-    String(spec.parts_changed ?? '').toLowerCase().includes(query)
+  const filtered = parts.filter(part =>
+    String(part.id ?? '').toLowerCase().includes(query) ||
+    String(part.part_name ?? '').toLowerCase().includes(query) ||
+    String(part.part_description ?? '').toLowerCase().includes(query) ||
+    String(part.serial_number ?? '').toLowerCase().includes(query)
   )
 
   return (
     <div>
       <div className="page-header">
         <div>
-          <div className="page-title">Machine Specs</div>
-          <div className="page-subtitle">{specs.length} machine specs tracked</div>
+          <div className="page-title">Machine Parts</div>
+          <div className="page-subtitle">{parts.length} parts tracked</div>
         </div>
         <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
           <span className={`sync-pill ${syncStatus}`}>
@@ -71,7 +67,7 @@ export default function MachineParts() {
             <div className="alert-banner-title">Load Error</div>
             <div className="alert-banner-body">{error}</div>
           </div>
-          <button className="btn btn-secondary btn-sm" style={{ marginLeft: 'auto' }} onClick={fetchSpecs}>Retry</button>
+          <button className="btn btn-secondary btn-sm" style={{ marginLeft: 'auto' }} onClick={fetchParts}>Retry</button>
         </div>
       )}
 
@@ -80,7 +76,7 @@ export default function MachineParts() {
           <div className="search-bar">
             <span className="search-icon">⌕</span>
             <input
-              placeholder="Search specs by id, user, name, location, usecase, defect parts…"
+              placeholder="Search parts by id, name, description, or serial number…"
               value={search}
               onChange={e => setSearch(e.target.value)}
             />
@@ -93,14 +89,9 @@ export default function MachineParts() {
             <thead>
               <tr>
                 <th>ID</th>
-                <th>User ID</th>
-                <th>Name</th>
-                <th>Location</th>
-                <th>Usecase</th>
-                <th>Details</th>
-                <th>Defect Parts</th>
-                <th>Parts Changed</th>
-                <th>Changed At</th>
+                <th>Part Name</th>
+                <th>Part Description</th>
+                <th>Serial Number</th>
                 <th>Created At</th>
               </tr>
             </thead>
@@ -108,34 +99,29 @@ export default function MachineParts() {
               {loading ? (
                 [...Array(6)].map((_, i) => (
                   <tr key={i}>
-                    {[...Array(10)].map((_, j) => (
-                      <td key={j}><div className="skeleton" style={{ height: 16, width: j >= 2 && j <= 7 ? 140 : 90 }} /></td>
+                    {[...Array(5)].map((_, j) => (
+                      <td key={j}><div className="skeleton" style={{ height: 16, width: j === 2 ? 220 : 120 }} /></td>
                     ))}
                   </tr>
                 ))
               ) : filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={10}>
+                  <td colSpan={5}>
                     <div className="empty-state">
                       <div className="empty-state-icon">⚙</div>
-                      <div className="empty-state-title">No machine specs found</div>
-                      <div className="empty-state-desc">No machine spec records are currently available</div>
+                      <div className="empty-state-title">No machine parts found</div>
+                      <div className="empty-state-desc">No parts records are currently available</div>
                     </div>
                   </td>
                 </tr>
               ) : (
-                filtered.map(spec => (
-                  <tr key={spec.id}>
-                    <td className="mono" style={{ color: 'var(--text-muted)', fontSize: 12 }}>{spec.id}</td>
-                    <td className="mono" style={{ color: 'var(--text-muted)', fontSize: 12 }}>{spec.user_id || '—'}</td>
-                    <td style={{ fontWeight: 600 }}>{spec.name || '—'}</td>
-                    <td style={{ color: 'var(--text-secondary)' }}>{spec.location || '—'}</td>
-                    <td style={{ color: 'var(--text-secondary)' }}>{spec.usecase || '—'}</td>
-                    <td style={{ color: 'var(--text-secondary)' }}>{spec.details || '—'}</td>
-                    <td style={{ color: 'var(--text-secondary)' }}>{spec.defect_parts || '—'}</td>
-                    <td style={{ color: 'var(--text-secondary)' }}>{spec.parts_changed || '—'}</td>
-                    <td className="mono" style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{formatDate(spec.changed_at)}</td>
-                    <td className="mono" style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{formatDate(spec.created_at)}</td>
+                filtered.map(part => (
+                  <tr key={part.id}>
+                    <td className="mono" style={{ color: 'var(--text-muted)', fontSize: 12 }}>{part.id}</td>
+                    <td style={{ fontWeight: 600 }}>{part.part_name || '—'}</td>
+                    <td style={{ color: 'var(--text-secondary)' }}>{part.part_description || '—'}</td>
+                    <td className="mono" style={{ color: 'var(--text-secondary)' }}>{part.serial_number || '—'}</td>
+                    <td className="mono" style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{formatDate(part.created_at)}</td>
                   </tr>
                 ))
               )}

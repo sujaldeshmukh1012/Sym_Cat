@@ -3,7 +3,6 @@ import { supabase } from '../src/supabase'
 
 export default function Inventory() {
   const [items, setItems] = useState([])
-  const [latestStatusByInventoryId, setLatestStatusByInventoryId] = useState({})
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [syncStatus, setSyncStatus] = useState('synced')
@@ -14,16 +13,10 @@ export default function Inventory() {
   async function fetchItems() {
     setLoading(true)
     setError(null)
-    const [inventoryRes, logsRes] = await Promise.all([
-      supabase
-        .from('inventory')
-        .select('*')
-        .order('name', { ascending: true }),
-      supabase
-        .from('logs')
-        .select('inventory_id, status, inspected_at, created_at')
-        .order('inspected_at', { ascending: false }),
-    ])
+    const inventoryRes = await supabase
+      .from('inventory')
+      .select('id, created_at, part_number, part_name, component_tag, stock_qty, unit_price, fleet_serial')
+      .order('created_at', { ascending: false })
 
     if (inventoryRes.error) {
       setError('Failed to load inventory. Check your connection and try again.')
@@ -31,26 +24,15 @@ export default function Inventory() {
       setItems(inventoryRes.data || [])
     }
 
-    if (!logsRes.error && Array.isArray(logsRes.data)) {
-      const statusMap = {}
-      for (const log of logsRes.data) {
-        const key = String(log.inventory_id ?? '')
-        if (!key || statusMap[key]) continue
-        statusMap[key] = log.status
-      }
-      setLatestStatusByInventoryId(statusMap)
-    } else {
-      setLatestStatusByInventoryId({})
-    }
-
     setLoading(false)
   }
 
   const filtered = items.filter(i =>
-    i.name?.toLowerCase().includes(search.toLowerCase()) ||
-    i.part_number?.toLowerCase().includes(search.toLowerCase()) ||
-    i.user_id?.toLowerCase().includes(search.toLowerCase()) ||
-    i.brand?.toLowerCase().includes(search.toLowerCase())
+    String(i.id ?? '').toLowerCase().includes(search.toLowerCase()) ||
+    String(i.fleet_serial ?? '').toLowerCase().includes(search.toLowerCase()) ||
+    String(i.part_number ?? '').toLowerCase().includes(search.toLowerCase()) ||
+    String(i.part_name ?? '').toLowerCase().includes(search.toLowerCase()) ||
+    String(i.component_tag ?? '').toLowerCase().includes(search.toLowerCase())
   )
 
   function formatCreatedAt(value) {
@@ -62,24 +44,6 @@ export default function Inventory() {
       hour: '2-digit',
       minute: '2-digit',
     })
-  }
-
-  const statusBadgeFromLog = (inventoryId) => {
-    const status = latestStatusByInventoryId[String(inventoryId)]
-    if (!status) return <span className="badge badge-neutral"><span className="badge-dot" />No Log</span>
-
-    const normalized = String(status).toLowerCase()
-    if (normalized === 'critical') {
-      return <span className="badge badge-critical"><span className="badge-dot" />{status}</span>
-    }
-    if (normalized === 'moderate') {
-      return <span className="badge badge-warning"><span className="badge-dot" />{status}</span>
-    }
-    if (normalized === 'low') {
-      return <span className="badge badge-success"><span className="badge-dot" />{status}</span>
-    }
-
-    return <span className="badge badge-info"><span className="badge-dot" />{status}</span>
   }
 
   return (
@@ -113,7 +77,7 @@ export default function Inventory() {
           <div className="search-bar">
             <span className="search-icon">⌕</span>
             <input
-              placeholder="Search by id, user, name, part number, or brand…"
+              placeholder="Search by id, fleet serial, part number, part name, or component tag…"
               value={search}
               onChange={e => setSearch(e.target.value)}
             />
@@ -126,13 +90,13 @@ export default function Inventory() {
             <thead>
               <tr>
                 <th>ID</th>
-                <th>User ID</th>
-                <th>Item Name</th>
+                <th>Fleet Serial</th>
                 <th>Part Number</th>
-                <th>Brand</th>
-                <th>Quantity</th>
+                <th>Part Name</th>
+                <th>Component Tag</th>
+                <th>Stock Qty</th>
+                <th>Unit Price</th>
                 <th>Created At</th>
-                <th>Status</th>
               </tr>
             </thead>
             <tbody>
@@ -140,7 +104,7 @@ export default function Inventory() {
                 [...Array(6)].map((_, i) => (
                   <tr key={i}>
                     {[...Array(8)].map((_, j) => (
-                      <td key={j}><div className="skeleton" style={{ height: 16, width: j === 1 || j === 2 || j === 3 ? 140 : 80 }} /></td>
+                      <td key={j}><div className="skeleton" style={{ height: 16, width: j >= 1 && j <= 4 ? 130 : 90 }} /></td>
                     ))}
                   </tr>
                 ))
@@ -158,13 +122,13 @@ export default function Inventory() {
                 filtered.map(item => (
                   <tr key={item.id}>
                     <td className="mono" style={{ color: 'var(--text-muted)', fontSize: 12 }}>{item.id}</td>
-                    <td className="mono" style={{ color: 'var(--text-muted)', fontSize: 12 }}>{item.user_id || '—'}</td>
-                    <td style={{ fontWeight: 600 }}>{item.name}</td>
+                    <td className="mono" style={{ color: 'var(--text-muted)', fontSize: 12 }}>{item.fleet_serial ?? '—'}</td>
                     <td className="mono" style={{ color: 'var(--text-secondary)' }}>{item.part_number || '—'}</td>
-                    <td style={{ color: 'var(--text-secondary)' }}>{item.brand || '—'}</td>
-                    <td className="mono">{item.quantity ?? '—'}</td>
+                    <td style={{ fontWeight: 600 }}>{item.part_name || '—'}</td>
+                    <td style={{ color: 'var(--text-secondary)' }}>{item.component_tag || '—'}</td>
+                    <td className="mono">{item.stock_qty ?? '—'}</td>
+                    <td className="mono">{item.unit_price ?? '—'}</td>
                     <td className="mono" style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{formatCreatedAt(item.created_at)}</td>
-                    <td>{statusBadgeFromLog(item.id)}</td>
                   </tr>
                 ))
               )}

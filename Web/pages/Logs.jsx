@@ -15,15 +15,39 @@ export default function Logs() {
     setLoading(true)
     setError(null)
 
-    const { data, error } = await supabase
-      .from('logs')
-      .select('id, user_id, machine_spec_id, inspected_at, status, problem, created_at')
-      .order('inspected_at', { ascending: false })
+    const [tasksRes, orderCartRes] = await Promise.all([
+      supabase
+        .from('task')
+        .select('id, fleet_serial, inspection_id, title, state, description, feedback, created_at')
+        .order('created_at', { ascending: false }),
+      supabase
+        .from('order_cart')
+        .select('inspection_id, status, created_at')
+        .order('created_at', { ascending: false }),
+    ])
 
-    if (error) {
+    if (tasksRes.error) {
       setError('Failed to load logs. Check your connection and try again.')
     } else {
-      setLogs(data || [])
+      const latestOrderStatusByInspectionId = {}
+      if (!orderCartRes.error && Array.isArray(orderCartRes.data)) {
+        for (const row of orderCartRes.data) {
+          const key = String(row.inspection_id ?? '')
+          if (!key || latestOrderStatusByInspectionId[key]) continue
+          latestOrderStatusByInspectionId[key] = String(row.status ?? '').replace(/^"|"$/g, '')
+        }
+      }
+
+      const merged = (tasksRes.data || []).map(task => {
+        const inspectionKey = String(task.inspection_id ?? '')
+        const orderStatus = latestOrderStatusByInspectionId[inspectionKey]
+        return {
+          ...task,
+          resolved_state: orderStatus || task.state,
+        }
+      })
+
+      setLogs(merged)
     }
 
     setLoading(false)
@@ -43,10 +67,12 @@ export default function Logs() {
   const query = search.toLowerCase()
   const filtered = logs.filter(log =>
     String(log.id ?? '').toLowerCase().includes(query) ||
-    String(log.user_id ?? '').toLowerCase().includes(query) ||
-    String(log.machine_spec_id ?? '').toLowerCase().includes(query) ||
-    String(log.status ?? '').toLowerCase().includes(query) ||
-    String(log.problem ?? '').toLowerCase().includes(query)
+    String(log.fleet_serial ?? '').toLowerCase().includes(query) ||
+    String(log.inspection_id ?? '').toLowerCase().includes(query) ||
+    String(log.title ?? '').toLowerCase().includes(query) ||
+    String(log.resolved_state ?? '').toLowerCase().includes(query) ||
+    String(log.description ?? '').toLowerCase().includes(query) ||
+    String(log.feedback ?? '').toLowerCase().includes(query)
   )
 
   return (
@@ -54,7 +80,7 @@ export default function Logs() {
       <div className="page-header">
         <div>
           <div className="page-title">Logs</div>
-          <div className="page-subtitle">{logs.length} total entries · sorted by latest inspection</div>
+          <div className="page-subtitle">{logs.length} total task entries · sorted by latest</div>
         </div>
         <button className="btn btn-secondary btn-sm" onClick={fetchLogs}>↻ Refresh</button>
       </div>
@@ -75,7 +101,7 @@ export default function Logs() {
           <div className="search-bar">
             <span className="search-icon">⌕</span>
             <input
-              placeholder="Search by id, user, machine spec, status, or problem…"
+              placeholder="Search by id, fleet, inspection, title, state, description, or feedback…"
               value={search}
               onChange={e => setSearch(e.target.value)}
             />
@@ -88,11 +114,12 @@ export default function Logs() {
             <thead>
               <tr>
                 <th>ID</th>
-                <th>User ID</th>
-                <th>Machine Spec ID</th>
-                <th>Inspected At</th>
-                <th>Status</th>
-                <th>Problem</th>
+                <th>Fleet Serial</th>
+                <th>Inspection ID</th>
+                <th>Title</th>
+                <th>State</th>
+                <th>Description</th>
+                <th>Feedback</th>
                 <th>Created At</th>
               </tr>
             </thead>
@@ -100,14 +127,14 @@ export default function Logs() {
               {loading ? (
                 [...Array(6)].map((_, i) => (
                   <tr key={i}>
-                    {[...Array(7)].map((_, j) => (
+                    {[...Array(8)].map((_, j) => (
                       <td key={j}><div className="skeleton" style={{ height: 16, width: j === 5 ? 220 : 100 }} /></td>
                     ))}
                   </tr>
                 ))
               ) : filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={7}>
+                  <td colSpan={8}>
                     <div className="empty-state">
                       <div className="empty-state-icon">☰</div>
                       <div className="empty-state-title">No log entries found</div>
@@ -119,16 +146,19 @@ export default function Logs() {
                 filtered.map(log => (
                   <tr key={log.id}>
                     <td className="mono" style={{ color: 'var(--text-muted)', fontSize: 12 }}>{log.id}</td>
-                    <td className="mono" style={{ color: 'var(--text-muted)', fontSize: 12 }}>{log.user_id || '—'}</td>
-                    <td className="mono" style={{ color: 'var(--text-secondary)', fontSize: 12 }}>{log.machine_spec_id || '—'}</td>
-                    <td className="mono" style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{formatDate(log.inspected_at)}</td>
+                    <td className="mono" style={{ color: 'var(--text-muted)', fontSize: 12 }}>{log.fleet_serial || '—'}</td>
+                    <td className="mono" style={{ color: 'var(--text-secondary)', fontSize: 12 }}>{log.inspection_id || '—'}</td>
+                    <td style={{ fontWeight: 600 }}>{log.title || '—'}</td>
                     <td>
                       <span className="badge badge-info">
-                        <span className="badge-dot" /> {log.status || '—'}
+                        <span className="badge-dot" /> {log.resolved_state || '—'}
                       </span>
                     </td>
                     <td style={{ color: 'var(--text-secondary)', maxWidth: 360 }}>
-                      <span style={{ display: 'block', whiteSpace: 'pre-wrap' }}>{log.problem || '—'}</span>
+                      <span style={{ display: 'block', whiteSpace: 'pre-wrap' }}>{log.description || '—'}</span>
+                    </td>
+                    <td style={{ color: 'var(--text-secondary)', maxWidth: 360 }}>
+                      <span style={{ display: 'block', whiteSpace: 'pre-wrap' }}>{log.feedback || '—'}</span>
                     </td>
                     <td className="mono" style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{formatDate(log.created_at)}</td>
                   </tr>
