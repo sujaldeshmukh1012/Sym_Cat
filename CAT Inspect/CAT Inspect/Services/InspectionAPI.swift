@@ -460,7 +460,7 @@ final class SupabaseInspectionBackend {
             anomalies: reportPayload.anomalies
         )
 
-        let pdfData = try makeInspectionPDF(reportData: reportData)
+        let pdfData = try await makeInspectionPDF(reportData: reportData)
         let objectKey = "reports/inspection_\(inspectionID)_\(Int(Date().timeIntervalSince1970)).pdf"
         let reportURL = try await uploadObject(
             objectKey: objectKey,
@@ -542,127 +542,172 @@ final class SupabaseInspectionBackend {
         return Self.reportDateFormatter.string(from: Date())
     }
 
-    private func makeInspectionPDF(reportData: LocalReportRenderData) throws -> Data {
-        let pageRect = CGRect(x: 0, y: 0, width: 595, height: 842) // A4 points
-        let margin: CGFloat = 28
-        let contentWidth = pageRect.width - (margin * 2)
-        let renderer = UIGraphicsPDFRenderer(bounds: pageRect)
+    private func makeInspectionPDF(reportData: LocalReportRenderData) async throws -> Data {
+        let html = renderReportHTML(reportData: reportData)
+        return try await renderPDFData(from: html)
+    }
 
-        let titleFont = UIFont.boldSystemFont(ofSize: 18)
-        let headingFont = UIFont.boldSystemFont(ofSize: 11)
-        let bodyFont = UIFont.systemFont(ofSize: 9)
-        let smallFont = UIFont.boldSystemFont(ofSize: 8)
-        let boldBody = UIFont.boldSystemFont(ofSize: 9)
-
-        let data = renderer.pdfData { context in
-            var y: CGFloat = margin
-
-            func startPage() {
-                context.beginPage()
-                y = margin
+    private func renderReportHTML(reportData: LocalReportRenderData) -> String {
+        let logoHTML: String = {
+            if let image = UIImage(named: "Alter_CAT"), let data = image.pngData() {
+                let b64 = data.base64EncodedString()
+                return "<img src=\"data:image/png;base64,\(b64)\" style=\"height:52px; width:auto;\" />"
             }
-
-            func drawText(_ text: String, font: UIFont, color: UIColor = .black, spacingAfter: CGFloat = 8) {
-                let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
-                let rect = NSString(string: text).boundingRect(
-                    with: CGSize(width: contentWidth, height: .greatestFiniteMagnitude),
-                    options: [.usesLineFragmentOrigin, .usesFontLeading],
-                    attributes: attrs,
-                    context: nil
-                )
-                if y + rect.height > pageRect.height - margin {
-                    startPage()
-                }
-                NSString(string: text).draw(
-                    with: CGRect(x: margin, y: y, width: contentWidth, height: rect.height),
-                    options: [.usesLineFragmentOrigin, .usesFontLeading],
-                    attributes: attrs,
-                    context: nil
-                )
-                y += rect.height + spacingAfter
+            if let image = UIImage(named: "cat_logo"), let data = image.pngData() {
+                let b64 = data.base64EncodedString()
+                return "<img src=\"data:image/png;base64,\(b64)\" style=\"height:52px; width:auto;\" />"
             }
+            return "&nbsp;"
+        }()
 
-            func drawLabelValue(_ label: String, _ value: String, valueX: CGFloat? = nil) {
-                drawText(label, font: boldBody, color: UIColor(white: 0.28, alpha: 1), spacingAfter: 0)
-                let customX = valueX ?? (margin + 98)
-                let attrs: [NSAttributedString.Key: Any] = [.font: bodyFont, .foregroundColor: UIColor.black]
-                let textRect = NSString(string: value).boundingRect(
-                    with: CGSize(width: contentWidth - (customX - margin), height: .greatestFiniteMagnitude),
-                    options: [.usesLineFragmentOrigin, .usesFontLeading],
-                    attributes: attrs,
-                    context: nil
-                )
-                NSString(string: value).draw(
-                    with: CGRect(x: customX, y: y - 11, width: contentWidth - (customX - margin), height: textRect.height),
-                    options: [.usesLineFragmentOrigin, .usesFontLeading],
-                    attributes: attrs,
-                    context: nil
-                )
-                y += 5
-            }
-
-            startPage()
-
-            UIColor(red: 1.0, green: 0.80, blue: 0.0, alpha: 1.0).setFill()
-            UIBezierPath(rect: CGRect(x: margin, y: y, width: contentWidth, height: 3)).fill()
-            y += 9
-
-            drawText("AI-ENHANCED INSPECTION REPORT", font: smallFont, color: .darkGray, spacingAfter: 2)
-            drawText("\(reportData.componentIdentified) Analysis", font: titleFont, spacingAfter: 10)
-
-            let summaryBox = CGRect(x: margin, y: y, width: contentWidth, height: 104)
-            UIColor(white: 0.96, alpha: 1).setFill()
-            UIBezierPath(roundedRect: summaryBox, cornerRadius: 3).fill()
-            UIColor(white: 0.86, alpha: 1).setStroke()
-            UIBezierPath(roundedRect: summaryBox, cornerRadius: 3).stroke()
-            y += 10
-            drawLabelValue("Customer:", reportData.customerName)
-            drawLabelValue("Serial Number:", reportData.serialNumber, valueX: margin + 300)
-            drawLabelValue("Model:", reportData.model)
-            drawLabelValue("Inspector:", reportData.inspector)
-            drawLabelValue("Date:", reportData.date, valueX: margin + 300)
-            drawLabelValue("Inspection ID:", String(reportData.inspectionID))
-            drawLabelValue("Overall Status:", reportData.normalizedStatus, valueX: margin + 300)
-            y = summaryBox.maxY + 10
-
-            let impactTitle = "OPERATIONAL IMPACT"
-            let impactBox = CGRect(x: margin, y: y, width: contentWidth, height: 54)
-            UIColor(red: 1.0, green: 0.94, blue: 0.94, alpha: 1).setFill()
-            UIBezierPath(rect: impactBox).fill()
-            UIColor(red: 0.8, green: 0.0, blue: 0.0, alpha: 1).setFill()
-            UIBezierPath(rect: CGRect(x: margin, y: y, width: 3, height: 54)).fill()
-            drawText(impactTitle, font: smallFont, color: UIColor(red: 0.8, green: 0.0, blue: 0.0, alpha: 1), spacingAfter: 2)
-            drawText(reportData.operationalImpact, font: bodyFont, spacingAfter: 8)
-            y = impactBox.maxY + 8
-
-            drawText("DETAILED ANOMALIES", font: headingFont, color: UIColor(white: 0.3, alpha: 1), spacingAfter: 4)
-            let headerY = y
-            UIColor(white: 0.15, alpha: 1).setFill()
-            UIBezierPath(rect: CGRect(x: margin, y: headerY, width: contentWidth, height: 20)).fill()
-            drawText("Component", font: smallFont, color: .white, spacingAfter: 0)
-            drawText("Issue & Recommendation", font: smallFont, color: .white, spacingAfter: 0)
-            drawText("Severity", font: smallFont, color: .white, spacingAfter: 0)
-            y = headerY + 26
-
-            for (index, anomaly) in reportData.anomalies.enumerated() {
-                let component = anomaly["component"] ?? "Component"
-                let issue = anomaly["issue"] ?? "Issue"
-                let description = anomaly["description"] ?? "No description"
-                let severity = anomaly["severity"] ?? "Normal"
-                let action = anomaly["recommended_action"] ?? "No action provided"
-
-                drawText("(\(index + 1)) \(component)", font: boldBody, spacingAfter: 2)
-                drawText(issue, font: boldBody, color: UIColor(red: 0.8, green: 0.0, blue: 0.0, alpha: 1), spacingAfter: 1)
-                drawText(description, font: bodyFont, spacingAfter: 1)
-                drawText("Action: \(action)", font: bodyFont, color: UIColor(white: 0.35, alpha: 1), spacingAfter: 1)
-                drawText("Severity: \(severity)", font: boldBody, spacingAfter: 8)
-            }
-
-            if reportData.anomalies.isEmpty {
-                drawText("No anomalies captured for this inspection.", font: bodyFont, spacingAfter: 8)
+        let statusSummary = reportData.anomalies.reduce(into: (critical: 0, monitor: 0, ok: 0, na: 0)) { acc, anomaly in
+            let severity = (anomaly["severity"] ?? "").lowercased()
+            if severity == "critical" || severity == "fail" {
+                acc.critical += 1
+            } else if severity == "moderate" || severity == "monitor" {
+                acc.monitor += 1
+            } else if severity == "normal" || severity == "pass" {
+                acc.ok += 1
+            } else {
+                acc.na += 1
             }
         }
-        return data
+
+        let anomalyRows = reportData.anomalies.map { anomaly -> String in
+            let component = htmlEscape(anomaly["component"] ?? "Component")
+            let issue = htmlEscape(anomaly["issue"] ?? "Issue")
+            let description = htmlEscape(anomaly["description"] ?? "")
+            let recommendedAction = htmlEscape(anomaly["recommended_action"] ?? "")
+            let severityRaw = (anomaly["severity"] ?? "NORMAL")
+            let severityUpper = htmlEscape(severityRaw.uppercased())
+            let dotColor: String
+            let statusClass: String
+            switch severityRaw.lowercased() {
+            case "critical", "fail":
+                dotColor = "#cc0000"
+                statusClass = "FAIL"
+            case "moderate", "monitor":
+                dotColor = "#e87722"
+                statusClass = "MONITOR"
+            default:
+                dotColor = "#3a9e3a"
+                statusClass = "NORMAL"
+            }
+            return """
+            <tr class="item-row">
+                <td class="item-name">
+                    <span class="row-dot" style="background:\(dotColor);"></span>
+                    <strong>\(component)</strong> &mdash; \(issue)
+                </td>
+                <td class="item-status status-\(statusClass)">\(severityUpper)</td>
+            </tr>
+            <tr class="comment-row"><td colspan="2">Comments: \(description)</td></tr>
+            <tr class="action-row"><td colspan="2">Action: \(recommendedAction)</td></tr>
+            """
+        }.joined(separator: "\n")
+
+        let headerTitle = htmlEscape(
+            reportData.componentIdentified.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? "Wheel Loader: Safety & Maintenance"
+            : reportData.componentIdentified
+        )
+
+        let findingsSection: String = {
+            guard !reportData.anomalies.isEmpty else { return "" }
+            return """
+            <div class="section-header" style="margin-top:16px;">Detailed Findings</div>
+            <table class="findings-table">
+                \(anomalyRows)
+            </table>
+            """
+        }()
+
+        return """
+        <!DOCTYPE html>
+        <html>
+        <head>
+        <meta charset="utf-8"/>
+        <style>
+        *{margin:0;padding:0;box-sizing:border-box}
+        body{font-family:-apple-system,BlinkMacSystemFont,Arial,sans-serif;font-size:7.5pt;color:#000}
+        .page{padding:10px}
+        .header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px}
+        .title{font-size:13pt;font-weight:600}
+        .sub{font-size:7pt;color:#444;margin-top:2px}
+        .info{width:100%;border-collapse:collapse;margin-top:6px}
+        .info td{font-size:7pt;padding:2px 4px;vertical-align:top}
+        .lbl{color:#666;width:120px}
+        .val{color:#000}
+        .section{background:#cfcfcf;font-weight:600;font-size:8pt;padding:3px 5px;margin-top:8px}
+        .findings{width:100%;border-collapse:collapse}
+        .findings td{padding:4px 5px;font-size:7.5pt;border-bottom:1px solid #e5e5e5}
+        .item-name{width:75%}
+        .item-status{text-align:right;font-weight:600}
+        .comment td{padding-left:14px;font-size:7pt;background:#ffffcc}
+        .status-PASS,.status-NORMAL{color:#2f9e44}
+        .status-MONITOR{color:#e87722}
+        .status-FAIL{color:#cc0000}
+        .footer{margin-top:10px;font-size:7pt;display:flex;justify-content:space-between;border-top:1px solid #ddd;padding-top:4px}
+        </style>
+        </head>
+        <body>
+        <div class="page">
+        <div class="header">
+        <div>
+        <div class="title">\(headerTitle)</div>
+        <div class="sub">
+        Daily
+        <span style="color:#cc0000">●</span> \(statusSummary.critical)
+        <span style="color:#e87722">●</span> \(statusSummary.monitor)
+        <span style="color:#2f9e44">●</span> \(statusSummary.ok)
+        <span style="color:#777">●</span> \(statusSummary.na)
+        </div>
+        </div>
+        <div>\(logoHTML)</div>
+        </div>
+        <table class="info">
+        <tr><td class="lbl">Inspection #</td><td class="val">\(reportData.inspectionID)</td><td class="lbl">Customer #</td><td class="val">&nbsp;</td></tr>
+        <tr><td class="lbl">Serial</td><td class="val">\(htmlEscape(reportData.serialNumber))</td><td class="lbl">Customer</td><td class="val">\(htmlEscape(reportData.customerName))</td></tr>
+        <tr><td class="lbl">Make</td><td class="val">CATERPILLAR</td><td class="lbl">Work Order</td><td class="val">&nbsp;</td></tr>
+        <tr><td class="lbl">Model</td><td class="val">\(htmlEscape(reportData.model))</td><td class="lbl">Completed</td><td class="val">\(htmlEscape(reportData.date))</td></tr>
+        <tr><td class="lbl">Family</td><td class="val">Medium Wheel Loader</td><td class="lbl">Inspector</td><td class="val">\(htmlEscape(reportData.inspector))</td></tr>
+        <tr><td class="lbl">Location</td><td class="val" colspan="3">601 Richland St, East Peoria, IL 61611</td></tr>
+        </table>
+        \(findingsSection)
+        <div class="footer">
+        <span>SN: \(htmlEscape(reportData.serialNumber))</span>
+        <span>Executive Summary</span>
+        <span>Page 1</span>
+        </div>
+        </div>
+        </body>
+        </html>
+        """
+    }
+
+    private func renderPDFData(from html: String) async throws -> Data {
+        try await MainActor.run {
+            let renderer = HTMLPrintPageRenderer()
+            let formatter = UIMarkupTextPrintFormatter(markupText: html)
+            renderer.addPrintFormatter(formatter, startingAtPageAt: 0)
+
+            // A4 @ 72dpi
+            let paperRect = CGRect(x: 0, y: 0, width: 595.2, height: 841.8)
+            let printableRect = paperRect.insetBy(dx: 20, dy: 22)
+            renderer.setValue(NSValue(cgRect: paperRect), forKey: "paperRect")
+            renderer.setValue(NSValue(cgRect: printableRect), forKey: "printableRect")
+
+            return renderer.pdfData()
+        }
+    }
+
+    private func htmlEscape(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
+            .replacingOccurrences(of: "\"", with: "&quot;")
+            .replacingOccurrences(of: "'", with: "&#39;")
     }
 
     private func resolveFleet(from form: FleetInspectionFormData) async throws -> SupabaseFleetRow {
@@ -1067,6 +1112,19 @@ final class SupabaseInspectionBackend {
 }
 
 private struct EmptyResponse: Decodable {}
+
+private final class HTMLPrintPageRenderer: UIPrintPageRenderer {
+    func pdfData() -> Data {
+        let data = NSMutableData()
+        UIGraphicsBeginPDFContextToData(data, .zero, nil)
+        for page in 0..<numberOfPages {
+            UIGraphicsBeginPDFPage()
+            drawPage(at: page, in: UIGraphicsGetPDFContextBounds())
+        }
+        UIGraphicsEndPDFContext()
+        return data as Data
+    }
+}
 
 private struct SupabaseErrorBody: Decodable {
     let code: String?
