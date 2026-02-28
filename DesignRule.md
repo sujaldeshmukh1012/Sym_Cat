@@ -79,15 +79,19 @@ No more than 3 hierarchy levels per screen.
 
 ---
 
-DEFINE COLOR SYSTEM (LIGHT THEME)
+DEFINE COLOR SYSTEM (LIGHT THEME - ORANGE OPERATIONAL)
 
-Background: #F7F9FB
-Card: #FFFFFF
-Border: #E5EAF0
-Primary Action: Industrial yellow (muted)
-Success: Muted green
-Warning: Amber
-Critical: Red
+Background: #FFF4E8
+Card: #FFFCF9
+Border: #E5D0B8
+Primary Action (Orange): #C76A12
+Success: #3EA356
+Warning (Amber): #DE8A20
+Critical: #BA2C2C
+Heading Text: #2A1A0E
+Body Text: #423124
+Muted Text: #6E5A4A
+Button Text on Primary: #FFFFFF
 
 RULES:
 
@@ -95,6 +99,18 @@ RULES:
 * Never use color alone to communicate state.
 * No gradients.
 * No decorative shadows beyond subtle elevation.
+* All text on cards/background must use Heading Text, Body Text, or Muted Text tokens. Never use light text on light surfaces.
+* Minimum contrast ratio for all text remains 4.5:1.
+
+---
+
+DEFINE ORANGE THEME IMPLEMENTATION RULES
+
+* Orange is the primary brand/action color, not the base text color.
+* Large surfaces use warm off-white backgrounds, not saturated orange fills.
+* Primary CTA buttons use Primary Action orange with white text only.
+* Secondary actions must remain outline or text buttons with dark text.
+* Alert colors keep severity mapping (Critical/Warning/Info) and must include icon + text label.
 
 ---
 
