@@ -1,0 +1,10 @@
+modal>=1.3.0
+fastapi[standard]>=0.115.0
+python-multipart
+torch
+transformers
+accelerate
+qwen-vl-utils
+pillow
+supabase>=2.0.0
+python-dotenv
