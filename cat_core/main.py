@@ -4,19 +4,22 @@ Pipeline: router → analyzer → inventory → logger → response.
 """
 import base64
 import json
+import os
 
 import modal
 from fastapi import FastAPI, File, Form, UploadFile
 
 from analyzer import Inspector, app
 from inventory import check_parts
-from logger import log_inspection
 from router import Router
+
+# URL of the database API (log-inspection endpoint)
+LOG_API_URL = os.environ.get("LOG_API_URL", "https://karan-flowerless-glynda.ngrok-free.dev/log-inspection")
 
 # Lightweight image for the web endpoint (GPU + model live in analyzer.Inspector)
 web_image = (
     modal.Image.debian_slim(python_version="3.11")
-    .pip_install("fastapi", "uvicorn[standard]", "python-multipart", "supabase", "python-dotenv")
+    .pip_install("fastapi", "uvicorn[standard]", "python-multipart", "httpx")
     .add_local_python_source("analyzer", "router", "inventory", "logger", "db", "prompts")
 )
 
@@ -39,6 +42,8 @@ async def inspect(
     image: UploadFile = File(...),
     voice_text: str = Form(""),
     manual_description: str = Form(""),
+    task_id: int = Form(None),
+    inspection_id: int = Form(None),
 ):
     image_bytes = await image.read()
     image_b64 = base64.b64encode(image_bytes).decode("ascii")
@@ -105,22 +110,51 @@ async def inspect(
     # Step 4: Check inventory
     result["parts"] = check_parts(result.get("anomalies") or [])
 
-    # Step 5: Log to Supabase (inspections + order_cart)
-    prompt_snippet = subsection_prompt[:80] + "..." if len(subsection_prompt) > 80 else subsection_prompt
-    inspection_id = log_inspection(component, prompt_snippet, result)
-    result["logged"] = inspection_id is not None
+    # Step 5: Log to Supabase via database API (update task + create order_cart for insufficient stock)
+    log_result = {"task_updated": False, "orders_created": 0}
+    try:
+        import httpx
+
+        log_payload = {
+            "task_id": task_id,
+            "inspection_id": inspection_id,
+            "component": component,
+            "overall_status": result.get("overall_status", ""),
+            "operational_impact": result.get("operational_impact", ""),
+            "anomalies": result.get("anomalies") or [],
+            "parts": result.get("parts") or [],
+        }
+        with httpx.Client(timeout=15) as client:
+            resp = client.post(LOG_API_URL, json=log_payload)
+            if resp.status_code == 200:
+                log_result = resp.json()
+            else:
+                log_result["error"] = f"API {resp.status_code}: {resp.text[:300]}"
+    except Exception as exc:
+        log_result["error"] = str(exc)
+
+    result["logged"] = log_result.get("task_updated", False) or log_result.get("orders_created", 0) > 0
+    result["task_updated"] = log_result.get("task_updated", False)
+    result["orders_created"] = log_result.get("orders_created", 0)
+    if log_result.get("error"):
+        result["db_error"] = log_result["error"]
+    if log_result.get("errors"):
+        result["db_errors"] = log_result["errors"]
 
     # Step 6: Build final response matching the canonical JSON shape
-    result["inspection_id"] = inspection_id  # UUID from DB or None
+    result["inspection_id"] = inspection_id
+    result["task_id"] = task_id
     result["machine"] = result.get("machine", "Excavator")
-    # Normalize overall_status to RED/YELLOW/GREEN for downstream consumers
-    raw_status = (result.get("overall_status") or "").strip().upper()
-    if raw_status in ("CRITICAL", "RED"):
-        result["overall_status"] = "RED"
-    elif raw_status in ("MODERATE", "YELLOW"):
-        result["overall_status"] = "YELLOW"
-    elif raw_status in ("GOOD", "MINOR", "GREEN"):
-        result["overall_status"] = "GREEN"
+    # Normalize overall_status to fail/monitor/normal/pass
+    raw_status = (result.get("overall_status") or "").strip().lower()
+    if raw_status in ("critical", "red", "fail"):
+        result["overall_status"] = "fail"
+    elif raw_status in ("moderate", "yellow", "monitor"):
+        result["overall_status"] = "monitor"
+    elif raw_status in ("minor", "green", "normal"):
+        result["overall_status"] = "normal"
+    elif raw_status in ("good", "pass", "none", ""):
+        result["overall_status"] = "pass"
 
     # High-level route vs model-specific label (for debugging classification)
     result["component_identified"] = result.get("component_identified") or component
@@ -129,7 +163,9 @@ async def inspect(
 
 
 # Serve API as Modal ASGI app (same app as Inspector)
-@app.function(image=web_image)
+@app.function(
+    image=web_image,
+)
 @modal.asgi_app()
 def fastapi_app():
     return api

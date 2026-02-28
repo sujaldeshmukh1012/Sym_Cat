@@ -1,5 +1,5 @@
 """
-Logging layer: write inspection results to Supabase `inspections` table
+Logging layer: write inspection results to Supabase `task` table (anomalies update)
 and auto-populate `order_cart` for parts that need ordering.
 Also keeps local Python logging for debugging.
 """
@@ -11,29 +11,87 @@ from typing import Any
 _log = logging.getLogger("inspex")
 
 
-def _severity_to_status(overall: str) -> str:
-    """Map model output status to DB enum (RED/YELLOW/GREEN)."""
-    s = (overall or "").strip().upper()
-    if s in ("CRITICAL", "RED"):
-        return "RED"
-    if s in ("MODERATE", "YELLOW"):
-        return "YELLOW"
-    return "GREEN"
+def _normalize_severity(severity: str) -> str:
+    """Normalize model severity output to fail/monitor/normal/pass."""
+    s = (severity or "").strip().lower()
+    if s in ("critical", "red", "fail"):
+        return "fail"
+    if s in ("moderate", "yellow", "monitor"):
+        return "monitor"
+    if s in ("minor", "green", "normal"):
+        return "normal"
+    if s in ("good", "pass", "none"):
+        return "pass"
+    return "normal"
+
+
+def _severity_to_state(overall: str) -> str:
+    """Map overall_status to task state."""
+    s = _normalize_severity(overall)
+    if s == "fail":
+        return "fail"
+    if s == "monitor":
+        return "monitor"
+    return "pass"
+
+
+def _lookup_part_id(sb, component_name: str) -> int | None:
+    """Look up the parts table to find the part id matching a component name."""
+    try:
+        resp = (
+            sb.table("parts")
+            .select("id")
+            .ilike("part_name", f"%{component_name}%")
+            .limit(1)
+            .execute()
+        )
+        if resp.data:
+            return resp.data[0]["id"]
+    except Exception as exc:
+        _log.warning("Parts lookup failed for '%s': %s", component_name, exc)
+    return None
+
+
+def _lookup_inventory_stock(sb, component_tag: str) -> int:
+    """Check inventory stock_qty for a component tag. Returns 0 if not found."""
+    try:
+        resp = (
+            sb.table("inventory")
+            .select("stock_qty")
+            .eq("component_tag", component_tag)
+            .limit(1)
+            .execute()
+        )
+        if resp.data:
+            return int(resp.data[0].get("stock_qty", 0))
+    except Exception as exc:
+        _log.warning("Inventory lookup failed for '%s': %s", component_tag, exc)
+    return 0
 
 
 def log_inspection(
     component: str,
     subsection_prompt_used: str | None,
     result: dict[str, Any],
+    task_id: int | None = None,
+    inspection_id: int | None = None,
     equipment_id: str = "EQ-UNKNOWN",
     machine: str = "Excavator",
-) -> str | None:
+) -> dict[str, Any]:
     """
-    Persist inspection to Supabase and create order_cart rows for parts.
-    Returns the new inspection UUID, or None if DB insert fails.
+    1. Update the task table entry with anomalies (matching task_id).
+    2. Check inventory for insufficient parts and create order_cart entries.
+    3. Return dict with task_updated, orders_created, and inspection_id.
     """
     ts = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
     anomalies = result.get("anomalies") or []
+
+    # Normalize severity in each anomaly
+    for a in anomalies:
+        a["severity"] = _normalize_severity(a.get("severity", ""))
+
+    # Normalize overall_status
+    result["overall_status"] = _normalize_severity(result.get("overall_status", ""))
 
     # Always log locally
     _log.info(
@@ -44,47 +102,60 @@ def log_inspection(
         len(anomalies),
     )
 
-    # --- Write to Supabase ---
+    response = {
+        "task_updated": False,
+        "orders_created": 0,
+        "inspection_id": inspection_id,
+    }
+
     try:
         from db import get_supabase
         sb = get_supabase()
 
-        row = {
-            "equipment_id": equipment_id,
-            "machine": machine,
-            "component": component,
-            "overall_status": _severity_to_status(result.get("overall_status", "")),
-            "operational_impact": result.get("operational_impact"),
-            "anomalies": json.dumps(anomalies),  # JSONB column
-        }
+        # --- 1. Update the task table entry with anomalies ---
+        if task_id is not None:
+            task_update = {
+                "anomolies": json.dumps(anomalies),  # column is "anomolies" (typo in schema)
+                "state": _severity_to_state(result.get("overall_status", "")),
+                "description": result.get("operational_impact", ""),
+            }
+            resp = sb.table("task").update(task_update).eq("id", task_id).execute()
+            if resp.data:
+                response["task_updated"] = True
+                _log.info("Task %s updated with %d anomalies", task_id, len(anomalies))
+            else:
+                _log.warning("Task %s not found or update failed", task_id)
 
-        resp = sb.table("inspections").insert(row).execute()
-        if not resp.data:
-            _log.error("Supabase insert returned no data: %s", resp)
-            return None
-
-        inspection_id: str = resp.data[0]["id"]
-        _log.info("Inspection saved → %s", inspection_id)
-
-        # --- Populate order_cart for matched parts ---
+        # --- 2. Check inventory and create order_cart entries ---
         parts = result.get("parts") or []
         cart_rows = []
         for p in parts:
-            cart_rows.append({
-                "inspection_id": inspection_id,
-                "part_number": p["part_number"],
-                "part_name": p.get("part_name", ""),
-                "quantity": p.get("quantity", 1),
-                "urgency": p.get("urgency", "Moderate"),
-                "status": "pending",
-            })
+            component_tag = p.get("component_tag", "")
+            stock = _lookup_inventory_stock(sb, component_tag)
+
+            # Only order if stock is insufficient (0 or less than needed)
+            needed_qty = p.get("quantity", 1)
+            if stock < needed_qty:
+                # Look up the part_id from the parts table (FK requirement)
+                part_id = _lookup_part_id(sb, p.get("part_name", ""))
+                if part_id is not None:
+                    cart_rows.append({
+                        "inspection_id": inspection_id,
+                        "parts": part_id,  # FK to parts.id
+                        "quantity": needed_qty,
+                        "urgency": p.get("urgency", "monitor") == "fail",
+                        "status": "pending",
+                    })
+
         if cart_rows:
             sb.table("order_cart").insert(cart_rows).execute()
+            response["orders_created"] = len(cart_rows)
             _log.info("Order cart: %d items created for inspection %s", len(cart_rows), inspection_id)
 
-        return inspection_id
+        return response
 
     except Exception as exc:
         _log.error("Failed to persist inspection to Supabase: %s", exc)
-        return None
+        response["error"] = str(exc)
+        return response
 
