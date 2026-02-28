@@ -1,11 +1,13 @@
 import io
 import os
+import re
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import quote, unquote, urlparse
 
 import boto3
 from botocore.config import Config
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Response
 from jinja2 import Environment, FileSystemLoader
 from pydantic import BaseModel
 from xhtml2pdf import pisa
@@ -41,6 +43,18 @@ class ReportGenerateRequest(BaseModel):
     tasks: list[Any] = []
 
 
+def _derive_report_title(report_row: dict[str, Any]) -> str:
+    tasks = report_row.get("tasks")
+    if isinstance(tasks, list):
+        for task in tasks:
+            if isinstance(task, dict):
+                title = task.get("title")
+                if title:
+                    return str(title)
+    inspection_id = report_row.get("inspection_id")
+    return f"Inspection {inspection_id} Report" if inspection_id else "Inspection Report"
+
+
 def _build_public_url(object_key: str) -> str:
     if not SUPABASE_URL or not BUCKET_NAME:
         raise HTTPException(
@@ -48,6 +62,94 @@ def _build_public_url(object_key: str) -> str:
             detail="SUPABASE_URL and SUPABASE_BUCKET_NAME must be set for report links.",
         )
     return f"{SUPABASE_URL}/storage/v1/object/public/{BUCKET_NAME}/{object_key}"
+
+
+def _extract_object_key(report_pdf: str) -> str:
+    if not report_pdf:
+        raise HTTPException(status_code=404, detail="Report PDF path is missing")
+
+    normalized = report_pdf.strip()
+    if normalized.startswith(("http://", "https://")):
+        parsed = urlparse(normalized)
+        path = parsed.path.strip("/")
+        marker = f"storage/v1/object/public/{BUCKET_NAME}/"
+        marker_index = path.find(marker)
+        if marker_index != -1:
+            return path[marker_index + len(marker) :]
+        raise HTTPException(status_code=400, detail="Invalid report_pdf URL format")
+
+    return normalized.lstrip("/")
+
+
+def _extract_inspection_id_from_key(object_key: str) -> int | None:
+    match = re.search(r"inspection_(\d+)", object_key)
+    if not match:
+        return None
+    try:
+        return int(match.group(1))
+    except ValueError:
+        return None
+
+
+def _extract_report_id_from_key(object_key: str) -> int | None:
+    filename = object_key.rsplit("/", 1)[-1]
+    match = re.match(r"report_(\d+)_", filename)
+    if not match:
+        return None
+    try:
+        return int(match.group(1))
+    except ValueError:
+        return None
+
+
+def _list_report_pdf_objects(prefix: str = "reports/") -> list[dict[str, Any]]:
+    if not BUCKET_NAME:
+        raise HTTPException(status_code=500, detail="SUPABASE_BUCKET_NAME is not configured")
+
+    objects: list[dict[str, Any]] = []
+    continuation_token = None
+
+    while True:
+        params: dict[str, Any] = {"Bucket": BUCKET_NAME, "Prefix": prefix}
+        if continuation_token:
+            params["ContinuationToken"] = continuation_token
+
+        response = s3_client.list_objects_v2(**params)
+        for obj in response.get("Contents", []):
+            key = str(obj.get("Key") or "")
+            if key.lower().endswith(".pdf"):
+                objects.append(obj)
+
+        if not response.get("IsTruncated"):
+            break
+        continuation_token = response.get("NextContinuationToken")
+
+    return objects
+
+
+def _count_report_pdfs_in_s3(prefix: str = "reports/") -> int:
+    if not BUCKET_NAME:
+        raise HTTPException(status_code=500, detail="SUPABASE_BUCKET_NAME is not configured")
+
+    total = 0
+    continuation_token = None
+
+    while True:
+        params: dict[str, Any] = {"Bucket": BUCKET_NAME, "Prefix": prefix}
+        if continuation_token:
+            params["ContinuationToken"] = continuation_token
+
+        response = s3_client.list_objects_v2(**params)
+        for obj in response.get("Contents", []):
+            key = str(obj.get("Key") or "")
+            if key.lower().endswith(".pdf"):
+                total += 1
+
+        if not response.get("IsTruncated"):
+            break
+        continuation_token = response.get("NextContinuationToken")
+
+    return total
 
 
 def _create_pdf_bytes(report_data: dict[str, Any]) -> bytes:
@@ -141,11 +243,121 @@ def _process_generation(report_id: int, inspection_id: int, request_data: Report
 
 @router.get("")
 async def list_reports(inspection_id: int | None = Query(default=None)):
-    query = supabase.table("report").select("id, inspection_id, report_pdf, pdf_created, created_at")
-    if inspection_id is not None:
-        query = query.eq("inspection_id", inspection_id)
-    response = query.order("created_at", desc=True).execute()
-    return {"data": response.data or []}
+    pdf_objects = _list_report_pdf_objects(prefix="reports/")
+
+    data = []
+    for obj in pdf_objects:
+        object_key = str(obj.get("Key") or "")
+        parsed_inspection_id = _extract_inspection_id_from_key(object_key)
+        if inspection_id is not None and parsed_inspection_id != inspection_id:
+            continue
+
+        report_id = _extract_report_id_from_key(object_key)
+        created_at = None
+        if obj.get("LastModified"):
+            try:
+                created_at = obj["LastModified"].isoformat()
+            except Exception:
+                created_at = None
+
+        file_name = object_key.rsplit("/", 1)[-1]
+        item = {
+            "report_id": report_id,
+            "inspection_id": parsed_inspection_id,
+            "created_at": created_at,
+            "created_by": "—",
+            "title": file_name,
+            "pdf_link": f"/reports/pdf?key={quote(object_key, safe='')}",
+            "report_pdf": _build_public_url(object_key),
+        }
+        data.append(item)
+
+    data.sort(key=lambda row: row.get("created_at") or "", reverse=True)
+
+    return {"data": data}
+
+
+@router.get("/pdf")
+async def pull_report_pdf_by_key(key: str, download: bool = Query(default=True)):
+    if not BUCKET_NAME:
+        raise HTTPException(status_code=500, detail="SUPABASE_BUCKET_NAME is not configured")
+
+    object_key = unquote(key).lstrip("/")
+    if not object_key:
+        raise HTTPException(status_code=400, detail="Missing report object key")
+
+    try:
+        s3_object = s3_client.get_object(Bucket=BUCKET_NAME, Key=object_key)
+    except Exception:
+        raise HTTPException(status_code=404, detail="Report PDF not found in S3")
+
+    file_name = object_key.rsplit("/", 1)[-1] or "report.pdf"
+    content = s3_object["Body"].read()
+    headers = {}
+    if download:
+        headers["Content-Disposition"] = f'attachment; filename="{file_name}"'
+
+    return Response(content=content, media_type="application/pdf", headers=headers)
+
+
+@router.get("/stats")
+async def reports_stats():
+    db_report_count = 0
+    db_error = None
+    try:
+        db_count_resp = supabase.table("report").select("id", count="exact").limit(0).execute()
+        db_report_count = int(db_count_resp.count or 0)
+    except Exception as exc:
+        db_error = str(exc)
+
+    s3_pdf_count = 0
+    s3_error = None
+    try:
+        s3_pdf_count = int(_count_report_pdfs_in_s3(prefix="reports/"))
+    except Exception as exc:
+        s3_error = str(exc)
+
+    return {
+        "data": {
+            "db_report_count": db_report_count,
+            "s3_pdf_count": s3_pdf_count,
+            "db_error": db_error,
+            "s3_error": s3_error,
+        }
+    }
+
+
+@router.get("/{report_id}/pdf")
+async def pull_report_pdf(report_id: int, download: bool = Query(default=True)):
+    if not BUCKET_NAME:
+        raise HTTPException(status_code=500, detail="SUPABASE_BUCKET_NAME is not configured")
+
+    report_resp = (
+        supabase.table("report")
+        .select("id, report_pdf")
+        .eq("id", report_id)
+        .limit(1)
+        .execute()
+    )
+    rows = report_resp.data or []
+    if not rows:
+        raise HTTPException(status_code=404, detail="Report not found")
+
+    report_pdf = rows[0].get("report_pdf")
+    object_key = _extract_object_key(str(report_pdf or ""))
+
+    try:
+        s3_object = s3_client.get_object(Bucket=BUCKET_NAME, Key=object_key)
+    except Exception:
+        raise HTTPException(status_code=404, detail="Report PDF not found in S3")
+
+    file_name = object_key.rsplit("/", 1)[-1] or f"report_{report_id}.pdf"
+    content = s3_object["Body"].read()
+    headers = {}
+    if download:
+        headers["Content-Disposition"] = f'attachment; filename="{file_name}"'
+
+    return Response(content=content, media_type="application/pdf", headers=headers)
 
 
 @router.post("/generate/{inspection_id}")
