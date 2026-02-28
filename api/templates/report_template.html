@@ -4,100 +4,166 @@
     <style>
         @page {
             size: a4 portrait;
-            margin: 1.2cm;
+            margin: 1.2cm 1.2cm 1.5cm 1.2cm;
             @frame footer {
                 -pdf-frame-content: footerContent;
-                bottom: 1cm;
-                height: 1cm;
+                bottom: 0.8cm;
+                height: 0.8cm;
             }
         }
-        body { font-family: 'Verdana', sans-serif; color: #222; line-height: 1.2; }
-        .header { border-bottom: 3px solid #FFCD00; margin-bottom: 15px; padding-bottom: 8px; }
-        .title { font-size: 18pt; font-weight: bold; color: #000; margin-top: 2px; }
-        
-        /* Information Grid */
-        .summary-box { background-color: #f4f4f4; padding: 10px 15px; border: 1px solid #ddd; border-radius: 3px; margin-bottom: 15px; }
-        .info-table { width: 100%; border-collapse: collapse; }
-        .info-table td { padding: 2px 0; font-size: 8.5pt; }
-        .label { font-weight: bold; color: #444; width: 110px; }
 
-        /* Impact Alert Box */
-        .impact-box { border-left: 3px solid #cc0000; background: #fff0f0; padding: 8px 12px; margin-bottom: 15px; font-size: 9pt; }
-        .impact-title { color: #cc0000; font-weight: bold; text-transform: uppercase; font-size: 8pt; margin-bottom: 3px; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Verdana', sans-serif; color: #222; font-size: 8.5pt; line-height: 1.35; }
 
-        /* Findings Table */
-        h3 { border-bottom: 1px solid #ddd; padding-bottom: 3px; font-size: 11pt; margin-top: 20px; text-transform: uppercase; color: #444; }
+        /* ── INFO GRID ── */
+        .info-grid { width: 100%; border-collapse: collapse; margin-bottom: 14px; margin-top: 10px; }
+        .info-grid td { padding: 2px 6px 2px 0; font-size: 8pt; vertical-align: top; }
+        .info-grid .lbl { color: #555; width: 110px; }
+        .info-grid .val { color: #000; font-weight: normal; padding-right: 20px; }
+
+        /* ── SECTION HEADERS ── */
+        .section-header {
+            background: #555;
+            color: #fff;
+            font-weight: bold;
+            font-size: 8.5pt;
+            padding: 5px 10px;
+            margin-top: 12px;
+            margin-bottom: 0;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        /* ── FINDINGS TABLE ── */
         .findings-table { width: 100%; border-collapse: collapse; }
-        .findings-table th { background-color: #222; color: white; padding: 6px 10px; text-align: left; font-size: 8pt; }
-        .findings-table td { padding: 8px 10px; border-bottom: 1px solid #eee; font-size: 8.5pt; vertical-align: top; }
-        
-        .badge { padding: 2px 0; border-radius: 2px; font-weight: bold; font-size: 7.5pt; text-align: center; display: block; width: 75px; text-transform: uppercase; }
-        .severity-Critical { background-color: #cc0000; color: white; }
-        .severity-Moderate { background-color: #FFCD00; color: black; }
-        
-        .footer { text-align: center; font-size: 7.5pt; color: #aaa; }
+        .findings-table tr.item-row td {
+            padding: 5px 10px;
+            border-bottom: 1px solid #e8e8e8;
+            font-size: 8pt;
+            vertical-align: middle;
+        }
+        .findings-table tr.comment-row td {
+            padding: 2px 10px 6px 32px;
+            font-size: 7.5pt;
+            color: #555;
+            border-bottom: 1px solid #e8e8e8;
+            font-style: italic;
+            background: #fffff0;
+        }
+        .findings-table tr.action-row td {
+            padding: 2px 10px 6px 32px;
+            font-size: 7.5pt;
+            color: #7a0000;
+            border-bottom: 1px solid #e8e8e8;
+            font-style: italic;
+            background: #fff0f0;
+        }
+        .findings-table .item-name { width: 70%; }
+        .findings-table .item-status { width: 30%; text-align: right; font-weight: bold; font-size: 8pt; }
+
+        /* Status colours */
+        .status-NORMAL  { color: #3a9e3a; }
+        .status-PASS    { color: #3a9e3a; }
+        .status-MONITOR { color: #e87722; }
+        .status-FAIL    { color: #cc0000; }
+        .status-Critical{ color: #cc0000; }
+
+        .row-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+
+        /* ── FOOTER ── */
+        .footer { text-align: center; font-size: 7pt; color: #aaa; }
+        .footer hr { border: 0; border-top: 1px solid #eee; margin-bottom: 3px; }
     </style>
 </head>
 <body>
-    <div class="header">
-        <div style="font-size: 8pt; color: #777; font-weight: bold;">AI-ENHANCED INSPECTION REPORT</div>
-        <div class="title">{{ component_identified }} Analysis</div>
-    </div>
 
-    <div class="summary-box">
-        <table class="info-table">
-            <tr>
-                <td class="label">Customer:</td><td>{{ customer_name }}</td>
-                <td class="label">Serial Number:</td><td>{{ serial_number }}</td>
-            </tr>
-            <tr>
-                <td class="label">Model:</td><td>{{ model }}</td>
-            </tr>
-            <tr>
-                <td class="label">Inspector:</td><td>{{ inspector }}</td>
-                <td class="label">Date:</td><td>{{ date }}</td>
-            </tr>
-            <tr>
-                <td class="label">Inspection ID:</td><td>{{ inspection_id }}</td>
-                <td class="label">Overall Status:</td><td><span class="badge severity-{{ overall_status }}">{{ overall_status }}</span></td>
-            </tr>
-        </table>
-    </div>
-
-    <div class="impact-box">
-        <div class="impact-title">Operational Impact</div>
-        {{ operational_impact }}
-    </div>
-
-    <h3>Detailed Anomalies</h3>
-    <table class="findings-table">
-        <thead>
-            <tr>
-                <th width="20%">Component</th>
-                <th width="65%">Issue & Recommendation</th>
-                <th width="15%">Severity</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for anomaly in anomalies %}
-            <tr>
-                <td><strong>{{ anomaly.component }}</strong></td>
-                <td>
-                    <div style="font-weight: bold; color: #cc0000; margin-bottom: 2px;">{{ anomaly.issue }}</div>
-                    <div>{{ anomaly.description }}</div>
-                    <div style="margin-top: 5px; font-size: 8pt; font-style: italic; color: #555;">
-                        Action: {{ anomaly.recommended_action }}
-                    </div>
-                </td>
-                <td><span class="badge severity-{{ anomaly.severity }}">{{ anomaly.severity }}</span></td>
-            </tr>
-            {% endfor %}
-        </tbody>
+    <!-- ══ HEADER ══ -->
+    <table style="width:100%; margin-bottom:8px; border-collapse:collapse;">
+        <tr>
+            <td style="vertical-align:bottom; width:75%;">
+                &nbsp;
+            </td>
+            <td style="text-align:right; vertical-align:top;">
+                <img src="C:\Users\priti\Downloads\Sym_Cat\api\cat_report_logo.png" style="height:45px; width:auto;" />
+            </td>
+        </tr>
+        <tr>
+            <td colspan="2" style="padding-top:6px; border-bottom: 2px solid #222; padding-bottom:6px;">
+                <div style="font-size:15pt; font-weight:bold; color:#000;">Wheel Loader: Safety &amp; Maintenance</div>
+                <div style="font-size:8pt; color:#555; margin-top:2px;">
+                    Daily &nbsp;&nbsp;&nbsp;
+                    <span style="color:#cc0000;">&#9679;</span> <span style="font-size:7.5pt; color:#555; margin-right:6px;">2</span>
+                    <span style="color:#e87722;">&#9679;</span> <span style="font-size:7.5pt; color:#555; margin-right:6px;">7</span>
+                    <span style="color:#3a9e3a;">&#9679;</span> <span style="font-size:7.5pt; color:#555; margin-right:6px;">31</span>
+                    <span style="color:#aaa;">&#9679;</span> <span style="font-size:7.5pt; color:#555;">0</span>
+                </div>
+            </td>
+        </tr>
     </table>
 
+    <!-- ══ INFO GRID ══ -->
+    <table class="info-grid">
+        <tr>
+            <td class="lbl">Inspection Number</td><td class="val">{{ inspection_id }}</td>
+            <td class="lbl">Customer No</td><td class="val">&nbsp;</td>
+        </tr>
+        <tr>
+            <td class="lbl">Serial Number</td><td class="val">{{ serial_number }}</td>
+            <td class="lbl">Customer Name</td><td class="val">{{ customer_name }}</td>
+        </tr>
+        <tr><td colspan="4" style="padding:3px 0;"></td></tr>
+        <tr>
+            <td class="lbl">Make</td><td class="val">CATERPILLAR</td>
+            <td class="lbl">Work Order</td><td class="val">&nbsp;</td>
+        </tr>
+        <tr>
+            <td class="lbl">Model</td><td class="val">{{ model }}</td>
+            <td class="lbl">Completed On</td><td class="val">{{ date }}</td>
+        </tr>
+        <tr>
+            <td class="lbl">Equipment Family</td><td class="val">Medium Wheel Loader</td>
+            <td class="lbl">Inspector</td><td class="val">{{ inspector }}</td>
+        </tr>
+        <tr>
+            <td class="lbl">PDF Generated On</td><td class="val">{{ date }}</td>
+            <td class="lbl">Location</td><td class="val">601 Richland St, East Peoria, IL 61611</td>
+        </tr>
+        <tr><td colspan="4" style="padding:3px 0;"></td></tr>
+        <tr>
+            <td class="lbl">Technician</td>
+            <td class="val" colspan="3" style="font-style:italic; font-size:12pt; letter-spacing:1px;">&#x1D4D5;&#x1D4F3;</td>
+        </tr>
+    </table>
+
+    <!-- ══ SECTION: Anomalies ══ -->
+    {% if anomalies %}
+    <div class="section-header" style="margin-top:16px;">Detailed Findings: {{ component_identified }}</div>
+    <table class="findings-table">
+        {% for anomaly in anomalies %}
+        <tr class="item-row">
+            <td class="item-name">
+                <span class="row-dot" style="background:{% if anomaly.severity == 'Critical' %}#cc0000{% elif anomaly.severity == 'Moderate' %}#e87722{% else %}#3a9e3a{% endif %};"></span>
+                <strong>{{ anomaly.component }}</strong> &mdash; {{ anomaly.issue }}
+            </td>
+            <td class="item-status status-{% if anomaly.severity == 'Critical' %}FAIL{% elif anomaly.severity == 'Moderate' %}MONITOR{% else %}NORMAL{% endif %}">
+                {{ anomaly.severity | upper }}
+            </td>
+        </tr>
+        <tr class="comment-row">
+            <td colspan="2">Comments: {{ anomaly.description }}</td>
+        </tr>
+        <tr class="action-row">
+            <td colspan="2">Action: {{ anomaly.recommended_action }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+    {% endif %}
+
+    <!-- ══ FOOTER ══ -->
     <div id="footerContent" class="footer">
-        <hr style="border: 0; border-top: 1px solid #eee;" />
-        Machine: {{ model }} ({{ serial_number }}) | Page <pdf:pagenumber>
+        <hr />
+        Inspection #{{ inspection_id }} | Machine: {{ model }} ({{ serial_number }}) | Page <pdf:pagenumber>
     </div>
+
 </body>
 </html>
