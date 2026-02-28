@@ -1,23 +1,3 @@
-"""
-test_live.py — Terminal test for Gemini Live API + Modal endpoint
-=================================================================
-Talk to Gemini through your mic. Gemini will call your /inspect
-endpoint when you describe equipment damage.
-
-For testing: since there's no camera, you can pass a test image
-path via TEST_IMAGE env var and it will use that automatically.
-
-Run:
-  pip install google-genai pyaudio aiohttp
-  
-  TEST_IMAGE=./data/BrokenRimBolt1.jpg \\
-  INSPEX_BASE_URL=https://your-modal-url.modal.run \\
-  GEMINI_API_KEY=your-key \\
-  python test_live.py
-
-Note: Use headphones to prevent echo.
-"""
-
 import asyncio
 import base64
 import json
@@ -32,7 +12,7 @@ from google.genai import types
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
-GEMINI_API_KEY  = "AIzaSyC1Tt-eaeBx9Fn4mPQ1Y24XH1fTQjSVYhQ"
+GEMINI_API_KEY  = ""
 INSPEX_BASE_URL = "https://manav-sharma-yeet--inspex-core-fastapi-app-dev.modal.run"
 API_BASE_URL    = "https://karan-flowerless-glynda.ngrok-free.dev"   # ngrok → localhost:8000
 TEST_IMAGE_PATH = "/Users/manav/Desktop/dev/projects/Sym_Cat/cat_core/data/test/BrokenRimBolt1.jpg"
