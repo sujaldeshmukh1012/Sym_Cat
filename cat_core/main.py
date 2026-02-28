@@ -4,7 +4,6 @@ Pipeline: router → analyzer → inventory → logger → response.
 """
 import base64
 import json
-import os
 
 import modal
 from fastapi import FastAPI, File, Form, UploadFile
@@ -13,13 +12,10 @@ from analyzer import Inspector, app
 from inventory import check_parts
 from router import Router
 
-# URL of the database API (log-inspection endpoint)
-LOG_API_URL = os.environ.get("LOG_API_URL", "https://karan-flowerless-glynda.ngrok-free.dev/log-inspection")
-
 # Lightweight image for the web endpoint (GPU + model live in analyzer.Inspector)
 web_image = (
     modal.Image.debian_slim(python_version="3.11")
-    .pip_install("fastapi", "uvicorn[standard]", "python-multipart", "httpx")
+    .pip_install("fastapi", "uvicorn[standard]", "python-multipart")
     .add_local_python_source("analyzer", "router", "inventory", "logger", "db", "prompts")
 )
 
@@ -110,38 +106,7 @@ async def inspect(
     # Step 4: Check inventory
     result["parts"] = check_parts(result.get("anomalies") or [])
 
-    # Step 5: Log to Supabase via database API (update task + create order_cart for insufficient stock)
-    log_result = {"task_updated": False, "orders_created": 0}
-    try:
-        import httpx
-
-        log_payload = {
-            "task_id": task_id,
-            "inspection_id": inspection_id,
-            "component": component,
-            "overall_status": result.get("overall_status", ""),
-            "operational_impact": result.get("operational_impact", ""),
-            "anomalies": result.get("anomalies") or [],
-            "parts": result.get("parts") or [],
-        }
-        with httpx.Client(timeout=15) as client:
-            resp = client.post(LOG_API_URL, json=log_payload)
-            if resp.status_code == 200:
-                log_result = resp.json()
-            else:
-                log_result["error"] = f"API {resp.status_code}: {resp.text[:300]}"
-    except Exception as exc:
-        log_result["error"] = str(exc)
-
-    result["logged"] = log_result.get("task_updated", False) or log_result.get("orders_created", 0) > 0
-    result["task_updated"] = log_result.get("task_updated", False)
-    result["orders_created"] = log_result.get("orders_created", 0)
-    if log_result.get("error"):
-        result["db_error"] = log_result["error"]
-    if log_result.get("errors"):
-        result["db_errors"] = log_result["errors"]
-
-    # Step 6: Build final response matching the canonical JSON shape
+    # Step 5: Build final response matching the canonical JSON shape
     result["inspection_id"] = inspection_id
     result["task_id"] = task_id
     result["machine"] = result.get("machine", "Excavator")
