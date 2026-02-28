@@ -59,12 +59,6 @@ export default function MachineParts() {
     })
   }
 
-  function openAdd() {
-    setEditSpec(null)
-    setForm(EMPTY_FORM)
-    setShowModal(true)
-  }
-
   function openEdit(spec) {
     setEditSpec(spec)
     setForm({
@@ -94,12 +88,13 @@ export default function MachineParts() {
       changed_at: form.changed_at ? new Date(form.changed_at).toISOString() : null,
     }
 
-    let error
-    if (editSpec) {
-      ({ error } = await supabase.from('machine_specs').update(payload).eq('id', editSpec.id))
-    } else {
-      ({ error } = await supabase.from('machine_specs').insert(payload))
+    if (!editSpec) {
+      setSaving(false)
+      setSyncStatus('failed')
+      return
     }
+
+    const { error } = await supabase.from('machine_specs').update(payload).eq('id', editSpec.id)
 
     if (error) {
       setSyncStatus('failed')
@@ -148,7 +143,6 @@ export default function MachineParts() {
             <span className="badge-dot" />
             {syncStatus === 'synced' ? 'Synced' : syncStatus === 'pending' ? 'Saving…' : 'Sync Failed'}
           </span>
-          <button className="btn btn-primary" onClick={openAdd}>+ Add Spec</button>
         </div>
       </div>
 
@@ -208,7 +202,7 @@ export default function MachineParts() {
                     <div className="empty-state">
                       <div className="empty-state-icon">⚙</div>
                       <div className="empty-state-title">No machine specs found</div>
-                      <div className="empty-state-desc">Add your first machine spec to get started</div>
+                      <div className="empty-state-desc">No machine spec records are currently available</div>
                     </div>
                   </td>
                 </tr>
@@ -243,7 +237,7 @@ export default function MachineParts() {
         <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setShowModal(false)}>
           <div className="modal" style={{ maxWidth: 680 }}>
             <div className="modal-header">
-              <div className="modal-title">{editSpec ? 'Edit Machine Spec' : 'Add Machine Spec'}</div>
+              <div className="modal-title">Edit Machine Spec</div>
               <button className="modal-close" onClick={() => setShowModal(false)}>✕</button>
             </div>
             <div className="modal-body">
@@ -313,7 +307,7 @@ export default function MachineParts() {
             <div className="modal-footer">
               <button className="btn btn-secondary" onClick={() => setShowModal(false)}>Cancel</button>
               <button className="btn btn-primary" onClick={handleSave} disabled={saving || !form.name}>
-                {saving ? 'Saving…' : editSpec ? 'Save Changes' : 'Add Spec'}
+                {saving ? 'Saving…' : 'Save Changes'}
               </button>
             </div>
           </div>

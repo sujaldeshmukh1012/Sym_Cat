@@ -32,12 +32,6 @@ export default function Inventory() {
     setLoading(false)
   }
 
-  function openAdd() {
-    setEditItem(null)
-    setForm(EMPTY_FORM)
-    setShowModal(true)
-  }
-
   function openEdit(item) {
     setEditItem(item)
     setForm({ name: item.name, part_number: item.part_number || '', brand: item.brand, quantity: item.quantity })
@@ -55,12 +49,13 @@ export default function Inventory() {
       quantity: Number(form.quantity),
     }
 
-    let error
-    if (editItem) {
-      ({ error } = await supabase.from('inventory').update(payload).eq('id', editItem.id))
-    } else {
-      ({ error } = await supabase.from('inventory').insert(payload))
+    if (!editItem) {
+      setSaving(false)
+      setSyncStatus('failed')
+      return
     }
+
+    const { error } = await supabase.from('inventory').update(payload).eq('id', editItem.id)
 
     if (error) {
       setSyncStatus('failed')
@@ -121,7 +116,6 @@ export default function Inventory() {
             <span className="badge-dot" />
             {syncStatus === 'synced' ? 'Synced' : syncStatus === 'pending' ? 'Saving…' : 'Sync Failed'}
           </span>
-          <button className="btn btn-primary" onClick={openAdd}>+ Add Item</button>
         </div>
       </div>
 
@@ -179,7 +173,7 @@ export default function Inventory() {
                     <div className="empty-state">
                       <div className="empty-state-icon">▦</div>
                       <div className="empty-state-title">No inventory items found</div>
-                      <div className="empty-state-desc">Add your first item to get started</div>
+                      <div className="empty-state-desc">No inventory records are currently available</div>
                     </div>
                   </td>
                 </tr>
@@ -213,7 +207,7 @@ export default function Inventory() {
         <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setShowModal(false)}>
           <div className="modal">
             <div className="modal-header">
-              <div className="modal-title">{editItem ? 'Edit Inventory Item' : 'Add Inventory Item'}</div>
+              <div className="modal-title">Edit Inventory Item</div>
               <button className="modal-close" onClick={() => setShowModal(false)}>✕</button>
             </div>
             <div className="modal-body">
@@ -255,7 +249,7 @@ export default function Inventory() {
             <div className="modal-footer">
               <button className="btn btn-secondary" onClick={() => setShowModal(false)}>Cancel</button>
               <button className="btn btn-primary" onClick={handleSave} disabled={saving || !form.name || !form.part_number || form.quantity === ''}>
-                {saving ? 'Saving…' : editItem ? 'Save Changes' : 'Add Item'}
+                {saving ? 'Saving…' : 'Save Changes'}
               </button>
             </div>
           </div>
