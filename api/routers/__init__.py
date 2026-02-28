@@ -10,9 +10,7 @@ from botocore.config import Config
 load_dotenv()
 
 supabase_url = os.getenv("SUPABASE_URL")
-supabase_key = os.getenv(
-    "SUPABASE_KEY"
-)
+supabase_key = os.getenv("SUPABASE_KEY")
 
 if not supabase_url or not supabase_key:
     raise RuntimeError("SUPABASE_URL and SUPABASE_KEY must be set.")

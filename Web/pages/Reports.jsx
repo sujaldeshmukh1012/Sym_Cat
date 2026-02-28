@@ -4,18 +4,20 @@ import { supabase } from '../src/supabase'
 const TEMPLATE_CARDS = [
   {
     id: 'T-1001',
-    user_id: 'template-user',
+    inspection_id: 'template-inspection',
     title: 'Hydraulic Pressure Inspection',
-    public_url: 'https://example.com/reports/hydraulic-pressure-inspection.pdf',
+    report_pdf: 'https://example.com/reports/hydraulic-pressure-inspection.pdf',
     created_at: '2026-02-01T10:15:00.000Z',
+    pdf_created: '2026-02-01T10:15:00.000Z',
     isTemplate: true,
   },
   {
     id: 'T-1002',
-    user_id: 'template-user',
+    inspection_id: 'template-inspection',
     title: 'Engine Performance Audit',
-    public_url: 'https://example.com/reports/engine-performance-audit.pdf',
+    report_pdf: 'https://example.com/reports/engine-performance-audit.pdf',
     created_at: '2026-02-10T14:40:00.000Z',
+    pdf_created: '2026-02-10T14:40:00.000Z',
     isTemplate: true,
   },
 ]
@@ -35,24 +37,28 @@ export default function Reports() {
     setError(null)
 
     const { data, error } = await supabase
-      .from('reports')
-      .select('id, user_id, title, public_url, created_at')
+      .from('report')
+      .select('id, inspection_id, report_pdf, pdf_created, created_at')
       .order('created_at', { ascending: false })
 
     if (error) {
       setError('Failed to load reports. Check your connection and try again.')
     } else {
-      setReports(data || [])
+      const mapped = (data || []).map(row => ({
+        ...row,
+        title: `Inspection ${row.inspection_id ?? '—'}`,
+      }))
+      setReports(mapped)
     }
 
     setLoading(false)
   }
 
   async function handleDownload(report) {
-    if (!report?.public_url) return
+    if (!report?.report_pdf) return
 
     try {
-      const response = await fetch(report.public_url)
+      const response = await fetch(report.report_pdf)
       if (!response.ok) {
         throw new Error('Download failed')
       }
@@ -67,7 +73,7 @@ export default function Reports() {
       link.remove()
       URL.revokeObjectURL(objectUrl)
     } catch {
-      window.open(report.public_url, '_blank', 'noopener,noreferrer')
+      window.open(report.report_pdf, '_blank', 'noopener,noreferrer')
     }
   }
 
@@ -87,7 +93,7 @@ export default function Reports() {
   const allReports = [...TEMPLATE_CARDS, ...liveReports]
   const filtered = allReports.filter(report =>
     String(report.id ?? '').toLowerCase().includes(query) ||
-    String(report.user_id ?? '').toLowerCase().includes(query) ||
+    String(report.inspection_id ?? '').toLowerCase().includes(query) ||
     String(report.title ?? '').toLowerCase().includes(query)
   )
 
@@ -118,7 +124,7 @@ export default function Reports() {
             <span className="search-icon">⌕</span>
             <input
               className="report-search-input"
-              placeholder="Search by report id, user id, or title…"
+              placeholder="Search by report id, inspection id, or title…"
               value={search}
               onChange={event => setSearch(event.target.value)}
             />
@@ -148,14 +154,14 @@ export default function Reports() {
             <div className="empty-state">
               <div className="empty-state-icon">◻</div>
               <div className="empty-state-title">No reports found</div>
-              <div className="empty-state-desc">Try searching by a different ID, user ID, or title</div>
+              <div className="empty-state-desc">Try searching by a different report ID, inspection ID, or title</div>
             </div>
           ) : (
             <div className="grid-3">
               {filtered.map(report => (
                 <div key={`${report.isTemplate ? 'template' : 'live'}-${report.id}`} className={`report-card${report.isTemplate ? ' report-card-template' : ''}`}>
                   <div className="mono report-card-id">ID: {report.id ?? '—'}</div>
-                  <div className="mono report-card-id" style={{ marginTop: -2 }}>User: {report.user_id || '—'}</div>
+                  <div className="mono report-card-id" style={{ marginTop: -2 }}>Inspection: {report.inspection_id || '—'}</div>
                   {report.isTemplate && (
                     <div className="report-card-top" style={{ marginBottom: 8 }}>
                       <span className="badge badge-info">Template</span>
@@ -163,13 +169,13 @@ export default function Reports() {
                   )}
                   <div className="report-card-title">{report.title || `Report ${report.id}`}</div>
                   <div className="mono" style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>
-                    Created: {formatDate(report.created_at)}
+                    Created: {formatDate(report.pdf_created || report.created_at)}
                   </div>
                   <div className="report-card-url">
-                    {report.public_url || 'No public URL available'}
+                    {report.report_pdf || 'Generating PDF…'}
                   </div>
                   <div className="report-card-actions">
-                    <button className="btn btn-sm btn-pdf" onClick={() => handleDownload(report)} disabled={!report.public_url}>
+                    <button className="btn btn-sm btn-pdf" onClick={() => handleDownload(report)} disabled={!report.report_pdf}>
                       Download PDF
                     </button>
                   </div>
