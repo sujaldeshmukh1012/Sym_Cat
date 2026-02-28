@@ -7,6 +7,7 @@ export default function Dashboard({ setActivePage }) {
   const [lowStock, setLowStock] = useState([])
   const [loading, setLoading] = useState(true)
   const [lastUpdated, setLastUpdated] = useState('')
+  const [dashboardError, setDashboardError] = useState('')
 
   useEffect(() => {
     fetchDashboardData()
@@ -14,12 +15,13 @@ export default function Dashboard({ setActivePage }) {
 
   async function fetchDashboardData() {
     setLoading(true)
+    setDashboardError('')
     const [inv, parts, logs, reports, recentLogsRes] = await Promise.all([
       supabase.from('inventory').select('id, quantity', { count: 'exact' }),
-      supabase.from('machine_parts').select('id', { count: 'exact' }),
+      supabase.from('machine_specs').select('id', { count: 'exact' }),
       supabase.from('logs').select('id', { count: 'exact' }),
-      supabase.from('reports').select('serial_number', { count: 'exact' }),
-      supabase.from('logs').select('*').order('timestamp', { ascending: false }).limit(5),
+      supabase.from('reports').select('id', { count: 'exact' }),
+      supabase.from('logs').select('id, user_id, status, inspected_at').order('inspected_at', { ascending: false }).limit(5),
     ])
 
     const lowStockRes = await supabase
@@ -29,11 +31,25 @@ export default function Dashboard({ setActivePage }) {
       .order('quantity', { ascending: true })
       .limit(5)
 
+    const errors = [inv.error, parts.error, logs.error, reports.error, recentLogsRes.error, lowStockRes.error]
+      .filter(Boolean)
+      .map(error => error.message)
+
+    if (errors.length > 0) {
+      setDashboardError(errors[0])
+    }
+
+    const safeCount = (result) => {
+      if (typeof result.count === 'number') return result.count
+      if (Array.isArray(result.data)) return result.data.length
+      return 0
+    }
+
     setStats({
-      inventory: inv.count || 0,
-      parts: parts.count || 0,
-      logs: logs.count || 0,
-      reports: reports.count || 0,
+      inventory: safeCount(inv),
+      parts: safeCount(parts),
+      logs: safeCount(logs),
+      reports: safeCount(reports),
     })
     setRecentLogs(recentLogsRes.data || [])
     setLowStock(lowStockRes.data || [])
@@ -43,7 +59,7 @@ export default function Dashboard({ setActivePage }) {
 
   const kpis = [
     { label: 'Inventory Items', value: stats.inventory, icon: '▦', page: 'inventory' },
-    { label: 'Machine Parts', value: stats.parts, icon: '⚙', page: 'parts' },
+    { label: 'Machine Specs', value: stats.parts, icon: '⚙', page: 'parts' },
     { label: 'Total Log Entries', value: stats.logs, icon: '☰', page: 'logs' },
     { label: 'Total Reports', value: stats.reports, icon: '◻', page: 'reports' },
   ]
@@ -58,6 +74,16 @@ export default function Dashboard({ setActivePage }) {
         </div>
         <button className="btn btn-secondary btn-sm" onClick={fetchDashboardData}>↻ Refresh</button>
       </div>
+
+      {dashboardError && (
+        <div className="alert-banner critical" style={{ marginBottom: 16 }}>
+          <span>✕</span>
+          <div>
+            <div className="alert-banner-title">Dashboard Data Error</div>
+            <div className="alert-banner-body">{dashboardError}</div>
+          </div>
+        </div>
+      )}
 
       {/* KPI Strip */}
       <div className="kpi-strip">
@@ -118,16 +144,22 @@ export default function Dashboard({ setActivePage }) {
               <table>
                 <thead>
                   <tr>
-                    <th>Inspector</th>
-                    <th>Timestamp</th>
+                    <th>User</th>
+                    <th>Status</th>
+                    <th>Inspected At</th>
                   </tr>
                 </thead>
                 <tbody>
                   {recentLogs.map(log => (
                     <tr key={log.id}>
-                      <td style={{ fontWeight: 500 }}>{log.inspector_name || '—'}</td>
+                      <td style={{ fontWeight: 500 }}>{log.user_id || '—'}</td>
+                      <td>
+                        <span className="badge badge-info">
+                          <span className="badge-dot" /> {log.status || '—'}
+                        </span>
+                      </td>
                       <td className="mono" style={{ color: 'var(--text-secondary)', fontSize: 12 }}>
-                        {log.timestamp ? new Date(log.timestamp).toLocaleString() : '—'}
+                        {log.inspected_at ? new Date(log.inspected_at).toLocaleString() : '—'}
                       </td>
                     </tr>
                   ))}
