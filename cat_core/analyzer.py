@@ -37,18 +37,18 @@ COMPONENT_EXAMPLES = {
       "component": "Cooling System Hose",
       "issue": "Hose Crack and Leak",
       "description": "Visible crack on upper radiator hose near clamp, active coolant seepage observed.",
-      "severity": "Critical",
+      "severity": "fail",
       "recommended_action": "Shut down immediately. Replace upper radiator hose and inspect clamp."
     },
     {
       "component": "Hose Clamp",
       "issue": "Loose Clamp",
       "description": "Hose clamp at upper connection is loose with visible gap between clamp and hose.",
-      "severity": "Critical",
+      "severity": "fail",
       "recommended_action": "Tighten or replace clamp to restore seal integrity."
     }
   ],
-  "overall_status": "Critical",
+  "overall_status": "fail",
   "operational_impact": "Risk of engine overheating and coolant loss due to hose and clamp failure."
 }""",
     "Steps/Handrails": """{
@@ -58,18 +58,18 @@ COMPONENT_EXAMPLES = {
       "component": "Access Ladder",
       "issue": "Bent Rung",
       "description": "Middle rung of access ladder is bent inward approximately 30 degrees, compromising safe footing.",
-      "severity": "Critical",
+      "severity": "fail",
       "recommended_action": "Do not use ladder. Replace bent rung before equipment operation."
     },
     {
       "component": "Handrail",
       "issue": "Corrosion on Handrail Surface",
       "description": "Surface rust visible on upper handrail section, reducing grip reliability.",
-      "severity": "Moderate",
+      "severity": "monitor",
       "recommended_action": "Sand and repaint handrail; schedule replacement if structural integrity is compromised."
     }
   ],
-  "overall_status": "Critical",
+  "overall_status": "fail",
   "operational_impact": "Personnel fall risk during equipment access due to structural and surface defects."
 }""",
     "Tires/Rims": """{
@@ -79,26 +79,26 @@ COMPONENT_EXAMPLES = {
       "component": "Rim",
       "issue": "Severe Rim Corrosion",
       "description": "Extensive rust and pitting observed on the rim structure, affecting integrity and mounting surfaces.",
-      "severity": "Critical",
+      "severity": "fail",
       "recommended_action": "Immediate replacement of the rim to prevent structural failure."
     },
     {
       "component": "Wheel Hardware",
       "issue": "Loose or Missing Wheel Hardware",
       "description": "One lug nut is visibly missing, compromising wheel stability and increasing the risk of wheel separation.",
-      "severity": "Critical",
+      "severity": "fail",
       "recommended_action": "Immediate inspection and replacement of missing lug nut; verify all hardware is secure."
     },
     {
       "component": "Tire",
       "issue": "Moderate Tire Wear",
       "description": "Tread appears worn but still functional; no critical damage to the sidewalls or surface.",
-      "severity": "Moderate",
+      "severity": "monitor",
       "recommended_action": "Monitor tread wear and schedule replacement as needed."
     }
   ],
   "wheel_position": "Front left",
-  "overall_status": "Critical",
+  "overall_status": "fail",
   "operational_impact": "Compromised safety and mobility due to critical rim and hardware issues."
 }""",
     "Engine": """{
@@ -108,18 +108,18 @@ COMPONENT_EXAMPLES = {
       "component": "Engine Belt",
       "issue": "Belt Wear",
       "description": "Serpentine belt shows visible fraying on outer edge, approaching end of service life.",
-      "severity": "Moderate",
+      "severity": "monitor",
       "recommended_action": "Schedule belt replacement within 24 hours."
     },
     {
       "component": "Oil Pan",
       "issue": "Oil Seepage",
       "description": "Dark staining visible around oil pan gasket indicating slow oil seepage.",
-      "severity": "Moderate",
+      "severity": "monitor",
       "recommended_action": "Monitor oil levels and schedule gasket replacement."
     }
   ],
-  "overall_status": "Moderate",
+  "overall_status": "monitor",
   "operational_impact": "Risk of belt failure and progressive oil loss if not addressed."
 }""",
     "Hydraulics": """{
@@ -129,18 +129,18 @@ COMPONENT_EXAMPLES = {
       "component": "Hydraulic Hose",
       "issue": "Active Hydraulic Leak",
       "description": "Hydraulic fluid seeping from boom cylinder hose connection, visible pooling below.",
-      "severity": "Critical",
+      "severity": "fail",
       "recommended_action": "Stop operation immediately. Replace hose and inspect cylinder seal."
     },
     {
       "component": "Hydraulic Fitting",
       "issue": "Corroded Fitting",
       "description": "Visible corrosion on quick-disconnect fitting at cylinder base, risk of seal failure.",
-      "severity": "Moderate",
+      "severity": "monitor",
       "recommended_action": "Replace corroded fitting at next maintenance window."
     }
   ],
-  "overall_status": "Critical",
+  "overall_status": "fail",
   "operational_impact": "Loss of hydraulic pressure and equipment control risk due to active leak."
 }""",
     "Undercarriage": """{
@@ -150,18 +150,18 @@ COMPONENT_EXAMPLES = {
       "component": "Track Roller",
       "issue": "Roller Seal Leak",
       "description": "Oil leaking from track roller seal, visible contamination on undercarriage frame.",
-      "severity": "Moderate",
+      "severity": "monitor",
       "recommended_action": "Schedule roller replacement at next maintenance window."
     },
     {
       "component": "Track Shoe",
       "issue": "Worn Track Shoe Grouser",
       "description": "Grouser height visibly reduced on multiple track shoes, indicating advanced wear.",
-      "severity": "Moderate",
+      "severity": "monitor",
       "recommended_action": "Measure grouser height and schedule track shoe replacement."
     }
   ],
-  "overall_status": "Moderate",
+  "overall_status": "monitor",
   "operational_impact": "Accelerated roller and track wear reducing traction and equipment lifespan."
 }""",
     "Cab/Glass": """{
@@ -171,18 +171,18 @@ COMPONENT_EXAMPLES = {
       "component": "Windshield",
       "issue": "Cracked Glass",
       "description": "Diagonal crack spanning left third of windshield, obstructing operator sight line.",
-      "severity": "Critical",
+      "severity": "fail",
       "recommended_action": "Replace windshield before operation. Operator visibility compromised."
     },
     {
       "component": "Door Seal",
       "issue": "Deteriorated Door Seal",
       "description": "Rubber seal along cab door shows cracking and gaps, allowing dust and moisture ingress.",
-      "severity": "Moderate",
+      "severity": "monitor",
       "recommended_action": "Replace door seal to restore cab environment protection."
     }
   ],
-  "overall_status": "Critical",
+  "overall_status": "fail",
   "operational_impact": "Operator visibility hazard and compromised cab environment."
 }""",
 }
@@ -204,7 +204,7 @@ EXAMPLE OF GOOD CONDITION (no issues found):
 {{
   "component_identified": "{component}",
   "anomalies": [],
-  "overall_status": "Good",
+  "overall_status": "pass",
   "operational_impact": "No issues detected. Component is in acceptable operating condition."
 }}
 
@@ -216,8 +216,8 @@ STRICT RULES — violations will be flagged:
 2. If a component is not clearly visible or is obstructed, do NOT mention it.
 3. Do NOT flag camera angle, lighting, dirt, or normal operational wear as anomalies.
 4. Do NOT invent damage that is not clearly visible. When in doubt, do NOT flag it.
-5. Severity: Critical = immediate shutdown / replacement, Moderate = schedule maintenance, Minor = monitor.
-6. If everything looks normal and functional, return an EMPTY anomalies array with overall_status "Good".
+5. Severity: fail = immediate shutdown / replacement, monitor = schedule maintenance, normal = acceptable wear / cosmetic.
+6. If everything looks normal and functional, return an EMPTY anomalies array with overall_status "pass".
 7. Return ONLY valid JSON. No markdown fences, no explanation, no extra text.
 
 OUTPUT SCHEMA:
@@ -228,11 +228,11 @@ OUTPUT SCHEMA:
       "component": "string",
       "issue": "string",
       "description": "string (be specific and detailed, reference what you see)",
-      "severity": "Critical | Moderate | Minor",
+      "severity": "fail | monitor | normal",
       "recommended_action": "string"
     }}
   ],
-  "overall_status": "Critical | Moderate | Minor | Good",
+  "overall_status": "fail | monitor | normal | pass",
   "operational_impact": "string"
 }}"""
 

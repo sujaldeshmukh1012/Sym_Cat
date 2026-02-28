@@ -1,7 +1,0 @@
-fastapi
-uvicorn
-supabase
-python-dotenv
-jinja2
-xhtml2pdf
-pydantic

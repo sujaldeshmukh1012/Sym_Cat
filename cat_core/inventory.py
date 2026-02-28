@@ -59,7 +59,7 @@ def check_parts(anomalies: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
     for anomaly in anomalies or []:
         component = anomaly.get("component", "")
-        severity = anomaly.get("severity", "Moderate")
+        severity = anomaly.get("severity", "monitor")
 
         # Try Supabase first, fall back to static catalog
         matches = _lookup_from_supabase(component)
@@ -81,7 +81,7 @@ def check_parts(anomalies: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "unit_price": float(part.get("unit_price", 0)),
                 "stock_qty": stock,
                 "lead_days": part.get("lead_days", 1),
-                "urgency": "Critical" if severity == "Critical" else "Moderate",
+                "urgency": "fail" if severity == "fail" else "monitor",
                 "in_stock": stock > 0,
             })
 
