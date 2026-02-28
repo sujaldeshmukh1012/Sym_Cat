@@ -11,6 +11,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(dotenv_path=os.path.join(BASE_DIR, ".env"))
 
 # TODO: Call the llm here and save the data in llm_data
+# grab task, filter by inspection id [0]
 llm_data = {
     "inspection_id": "5",
     "component_identified": "Tire Rim",
