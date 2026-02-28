@@ -1,8 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../src/supabase'
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000').replace(/\/$/, '')
-
 export default function Dashboard({ setActivePage }) {
   const [stats, setStats] = useState({ inventory: 0, parts: 0, logs: 0, reports: 0 })
   const [recentLogs, setRecentLogs] = useState([])
@@ -18,45 +16,36 @@ export default function Dashboard({ setActivePage }) {
   async function fetchDashboardData() {
     setLoading(true)
     setDashboardError('')
-    const [inv, parts, logs, reportsDb, recentLogsRes, orderCartRes] = await Promise.all([
+    const [inv, parts, logs, reportsDb, recentLogsRes, lowStockRes] = await Promise.all([
       supabase.from('inventory').select('id, stock_qty, created_at', { count: 'exact' }),
       supabase.from('parts').select('id', { count: 'exact' }),
       supabase.from('task').select('id', { count: 'exact' }),
       supabase.from('report').select('id', { count: 'exact' }),
       supabase.from('task').select('id, inspection_id, state, created_at').order('created_at', { ascending: false }).limit(5),
-      supabase.from('order_cart').select('inspection_id, status, created_at').order('created_at', { ascending: false }),
+      supabase
+        .from('inventory')
+        .select('id, part_name, component_tag, stock_qty')
+        .lt('stock_qty', 10)
+        .order('stock_qty', { ascending: true })
+        .limit(5),
     ])
 
-    let s3ReportsCount = 0
-    let s3StatsAvailable = false
-    let s3StatsReason = ''
-    try {
-      const statsResponse = await fetch(`${API_BASE_URL}/reports/stats`)
-      if (statsResponse.ok) {
-        const statsPayload = await statsResponse.json()
-        const value = Number(statsPayload?.data?.s3_pdf_count)
-        const s3Error = String(statsPayload?.data?.s3_error || '').trim()
-        if (Number.isFinite(value) && value >= 0 && !s3Error) {
-          s3ReportsCount = value
-          s3StatsAvailable = true
-        } else if (s3Error) {
-          s3StatsReason = s3Error
-        }
-      } else {
-        s3StatsReason = `stats endpoint returned ${statsResponse.status}`
-      }
-    } catch (error) {
-      s3ReportsCount = 0
-      s3StatsAvailable = false
-      s3StatsReason = error?.message || 'Network error fetching /reports/stats'
-    }
+    const recentInspectionIds = Array.from(
+      new Set(
+        (recentLogsRes.data || [])
+          .map(log => log.inspection_id)
+          .filter(inspectionId => inspectionId !== null && inspectionId !== undefined)
+      )
+    )
 
-    const lowStockRes = await supabase
-      .from('inventory')
-      .select('id, part_name, component_tag, stock_qty')
-      .lt('stock_qty', 10)
-      .order('stock_qty', { ascending: true })
-      .limit(5)
+    let orderCartRes = { data: [], error: null }
+    if (recentInspectionIds.length > 0) {
+      orderCartRes = await supabase
+        .from('order_cart')
+        .select('inspection_id, status, created_at')
+        .in('inspection_id', recentInspectionIds)
+        .order('created_at', { ascending: false })
+    }
 
     const errors = [inv.error, parts.error, logs.error, reportsDb.error, recentLogsRes.error, orderCartRes.error, lowStockRes.error]
       .filter(Boolean)
@@ -85,7 +74,6 @@ export default function Dashboard({ setActivePage }) {
       console.log('parts', { error: parts.error?.message || null, count: parts.count })
       console.log('task', { error: logs.error?.message || null, count: logs.count })
       console.log('report_db', { error: reportsDb.error?.message || null, count: reportsDb.count })
-      console.log('report_s3', { count: s3ReportsCount, available: s3StatsAvailable, reason: s3StatsReason || null })
       console.log('recentLogs', {
         error: recentLogsRes.error?.message || null,
         rows: Array.isArray(recentLogsRes.data) ? recentLogsRes.data.length : 0,
@@ -122,7 +110,7 @@ export default function Dashboard({ setActivePage }) {
       inventory: inventoryCount,
       parts: safeCount(parts),
       logs: safeCount(logs),
-      reports: s3StatsAvailable ? s3ReportsCount : safeCount(reportsDb),
+      reports: safeCount(reportsDb),
     })
     setRecentLogs(resolvedRecentLogs)
     setLowStock(lowStockRes.data || [])

@@ -17,15 +17,23 @@ export default function Reports() {
     setError(null)
 
     try {
-      const response = await fetch(`${API_BASE_URL}/reports`)
-      if (!response.ok) throw new Error('Request failed')
+      const controller = new AbortController()
+      const timeoutId = window.setTimeout(() => controller.abort(), 10000)
+      const response = await fetch(`${API_BASE_URL}/reports`, { signal: controller.signal })
+      window.clearTimeout(timeoutId)
+
+      if (!response.ok) throw new Error(`Request failed (${response.status})`)
       const payload = await response.json()
       setReports(payload.data || [])
-    } catch {
-      setError('Failed to load reports. Check your connection and try again.')
+    } catch (err) {
+      if (err?.name === 'AbortError') {
+        setError('Reports request timed out. Please retry.')
+      } else {
+        setError('Failed to load reports. Check your connection and try again.')
+      }
+    } finally {
+      setLoading(false)
     }
-
-    setLoading(false)
   }
 
   async function handleDownload(report) {

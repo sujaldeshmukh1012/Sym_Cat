@@ -55,6 +55,18 @@ def _derive_report_title(report_row: dict[str, Any]) -> str:
     return f"Inspection {inspection_id} Report" if inspection_id else "Inspection Report"
 
 
+def _derive_lightweight_report_title(report_row: dict[str, Any]) -> str:
+    report_id = report_row.get("id")
+    inspection_id = report_row.get("inspection_id")
+    if inspection_id and report_id:
+        return f"Inspection {inspection_id} Report #{report_id}"
+    if inspection_id:
+        return f"Inspection {inspection_id} Report"
+    if report_id:
+        return f"Report #{report_id}"
+    return "Inspection Report"
+
+
 def _build_public_url(object_key: str) -> str:
     if not SUPABASE_URL or not BUCKET_NAME:
         raise HTTPException(
@@ -152,6 +164,39 @@ def _count_report_pdfs_in_s3(prefix: str = "reports/") -> int:
     return total
 
 
+def _list_reports_from_db(inspection_id: int | None = None) -> list[dict[str, Any]]:
+    query = supabase.table("report").select("id, inspection_id, created_at, report_pdf")
+    if inspection_id is not None:
+        query = query.eq("inspection_id", inspection_id)
+
+    response = query.order("created_at", desc=True).limit(500).execute()
+
+    data: list[dict[str, Any]] = []
+    for row in response.data or []:
+        report_pdf = str(row.get("report_pdf") or "")
+        pdf_link = None
+        if report_pdf:
+            try:
+                object_key = _extract_object_key(report_pdf)
+                pdf_link = f"/reports/pdf?key={quote(object_key, safe='')}"
+            except HTTPException:
+                pdf_link = report_pdf if report_pdf.startswith(("http://", "https://")) else None
+
+        data.append(
+            {
+                "report_id": row.get("id"),
+                "inspection_id": row.get("inspection_id"),
+                "created_at": row.get("created_at"),
+                "created_by": "—",
+                "title": _derive_lightweight_report_title(row),
+                "pdf_link": pdf_link,
+                "report_pdf": report_pdf or None,
+            }
+        )
+
+    return data
+
+
 def _create_pdf_bytes(report_data: dict[str, Any]) -> bytes:
     html_out = template.render(**report_data)
     buffer = io.BytesIO()
@@ -242,8 +287,22 @@ def _process_generation(report_id: int, inspection_id: int, request_data: Report
 
 
 @router.get("")
-async def list_reports(inspection_id: int | None = Query(default=None)):
-    pdf_objects = _list_report_pdf_objects(prefix="reports/")
+
+
+async def list_reports(
+    inspection_id: int | None = Query(default=None),
+    include_s3: bool = Query(default=False),
+):
+    if not include_s3:
+        return {"data": _list_reports_from_db(inspection_id), "source": "db"}
+
+    try:
+        pdf_objects = _list_report_pdf_objects(prefix="reports/")
+    except Exception:
+        return {"data": _list_reports_from_db(inspection_id), "source": "db_fallback"}
+
+    if not pdf_objects:
+        return {"data": _list_reports_from_db(inspection_id), "source": "db_fallback"}
 
     data = []
     for obj in pdf_objects:
@@ -274,7 +333,7 @@ async def list_reports(inspection_id: int | None = Query(default=None)):
 
     data.sort(key=lambda row: row.get("created_at") or "", reverse=True)
 
-    return {"data": data}
+    return {"data": data, "source": "s3"}
 
 
 @router.get("/pdf")
@@ -301,7 +360,7 @@ async def pull_report_pdf_by_key(key: str, download: bool = Query(default=True))
 
 
 @router.get("/stats")
-async def reports_stats():
+async def reports_stats(include_s3: bool = Query(default=False)):
     db_report_count = 0
     db_error = None
     try:
@@ -310,12 +369,15 @@ async def reports_stats():
     except Exception as exc:
         db_error = str(exc)
 
-    s3_pdf_count = 0
+    s3_pdf_count = None
     s3_error = None
-    try:
-        s3_pdf_count = int(_count_report_pdfs_in_s3(prefix="reports/"))
-    except Exception as exc:
-        s3_error = str(exc)
+    if include_s3:
+        try:
+            s3_pdf_count = int(_count_report_pdfs_in_s3(prefix="reports/"))
+        except Exception as exc:
+            s3_error = str(exc)
+    else:
+        s3_error = "skipped"
 
     return {
         "data": {
@@ -323,6 +385,7 @@ async def reports_stats():
             "s3_pdf_count": s3_pdf_count,
             "db_error": db_error,
             "s3_error": s3_error,
+            "include_s3": include_s3,
         }
     }
 
