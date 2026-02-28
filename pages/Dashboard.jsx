@@ -18,7 +18,7 @@ export default function Dashboard({ setActivePage }) {
       supabase.from('inventory').select('id, quantity', { count: 'exact' }),
       supabase.from('machine_parts').select('id', { count: 'exact' }),
       supabase.from('logs').select('id', { count: 'exact' }),
-      supabase.from('reports').select('serial_number', { count: 'exact' }),
+      supabase.from('reports').select('id', { count: 'exact' }),
       supabase.from('logs').select('*').order('timestamp', { ascending: false }).limit(5),
     ])
 

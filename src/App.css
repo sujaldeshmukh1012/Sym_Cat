@@ -621,6 +621,77 @@ input:focus, select:focus, textarea:focus {
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
 
+/* ─── REPORT CARDS ─── */
+.reports-section {
+  margin-bottom: 20px;
+}
+
+.report-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-card);
+  padding: 16px;
+  transition: transform 140ms ease, box-shadow 140ms ease, border-color 140ms ease, background-color 140ms ease;
+}
+
+.report-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--primary);
+  background: linear-gradient(180deg, var(--card) 0%, var(--primary-light) 100%);
+  box-shadow: 0 0 0 2px var(--primary-light), var(--shadow-elevated);
+}
+
+.report-card-template {
+  border-style: dashed;
+}
+
+.report-card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.report-card-id {
+  color: var(--text-muted);
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
+.report-card-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+.report-card-url {
+  color: var(--text-secondary);
+  font-size: 13px;
+  word-break: break-all;
+  margin-bottom: 12px;
+  min-height: 36px;
+}
+
+.report-card-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.btn-pdf {
+  background: var(--critical-light);
+  color: var(--critical);
+  border: 1.5px solid color-mix(in srgb, var(--critical) 22%, white);
+}
+
+.btn-pdf:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--critical-light) 75%, white);
+  border-color: var(--critical);
+}
+
 /* ─── SYNC STATUS ─── */
 .sync-pill {
   display: inline-flex;
