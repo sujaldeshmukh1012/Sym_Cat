@@ -1,35 +1,58 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from '/vite.svg'
+import { useEffect, useState } from 'react'
+import Sidebar from '../components/Sidebar'
+import TopBar from '../components/TopBar'
+import Dashboard from '../pages/Dashboard'
+import Inventory from '../pages/Inventory'
+import MachineParts from '../pages/MachineParts'
+import Logs from '../pages/Logs'
+import Reports from '../pages/Reports'
 import './App.css'
 
-function App() {
-  const [count, setCount] = useState(0)
+export default function App() {
+  const [activePage, setActivePage] = useState('dashboard')
+  const [offlineMode, setOfflineMode] = useState(!navigator.onLine)
+
+  useEffect(() => {
+    function handleOnline() {
+      setOfflineMode(false)
+    }
+
+    function handleOffline() {
+      setOfflineMode(true)
+    }
+
+    window.addEventListener('online', handleOnline)
+    window.addEventListener('offline', handleOffline)
+
+    return () => {
+      window.removeEventListener('online', handleOnline)
+      window.removeEventListener('offline', handleOffline)
+    }
+  }, [])
+
+  const pages = {
+    dashboard: <Dashboard setActivePage={setActivePage} />,
+    inventory: <Inventory />,
+    parts: <MachineParts />,
+    logs: <Logs />,
+    reports: <Reports />,
+  }
 
   return (
-    <>
-      <div>
-        <a href="https://vite.dev" target="_blank">
-          <img src={viteLogo} className="logo" alt="Vite logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
+    <div className="app-shell">
+      {offlineMode && (
+        <div className="offline-banner">
+          <span className="offline-icon">⚠</span>
+          <strong>Offline Mode</strong> — Actions are queued and will sync when connection is restored.
+        </div>
+      )}
+      <TopBar activePage={activePage} />
+      <div className="app-body">
+        <Sidebar activePage={activePage} setActivePage={setActivePage} />
+        <main className="main-content">
+          {pages[activePage]}
+        </main>
       </div>
-      <h1>Vite + React</h1>
-      <div className="card">
-        <button onClick={() => setCount((count) => count + 1)}>
-          count is {count}
-        </button>
-        <p>
-          Edit <code>src/App.jsx</code> and save to test HMR
-        </p>
-      </div>
-      <p className="read-the-docs">
-        Click on the Vite and React logos to learn more
-      </p>
-    </>
+    </div>
   )
 }
-
-export default App
