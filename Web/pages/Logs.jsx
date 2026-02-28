@@ -5,6 +5,7 @@ export default function Logs() {
   const [logs, setLogs] = useState([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+  const [syncStatus, setSyncStatus] = useState('synced')
   const [error, setError] = useState(null)
 
   useEffect(() => {
@@ -14,6 +15,7 @@ export default function Logs() {
   async function fetchLogs() {
     setLoading(true)
     setError(null)
+    setSyncStatus('pending')
 
     const [tasksRes, orderCartRes] = await Promise.all([
       supabase
@@ -28,6 +30,7 @@ export default function Logs() {
 
     if (tasksRes.error) {
       setError('Failed to load logs. Check your connection and try again.')
+      setSyncStatus('failed')
     } else {
       const latestOrderStatusByInspectionId = {}
       if (!orderCartRes.error && Array.isArray(orderCartRes.data)) {
@@ -48,6 +51,7 @@ export default function Logs() {
       })
 
       setLogs(merged)
+      setSyncStatus('synced')
     }
 
     setLoading(false)
@@ -75,14 +79,35 @@ export default function Logs() {
     String(log.feedback ?? '').toLowerCase().includes(query)
   )
 
+  function getStateBadgeClass(stateValue) {
+    const normalized = String(stateValue ?? '').toLowerCase().trim()
+    if (normalized === 'completed' || normalized === 'confirmed' || normalized === 'approved') return 'badge-success'
+    if (normalized === 'pending' || normalized === 'in_progress' || normalized === 'in progress') return 'badge-warning'
+    if (normalized === 'declined' || normalized === 'rejected' || normalized === 'failed') return 'badge-critical'
+    return 'badge-info'
+  }
+
+  function truncateText(value, maxLength = 100) {
+    const text = String(value ?? '')
+    if (!text) return '—'
+    if (text.length <= maxLength) return text
+    return `${text.slice(0, maxLength)}...`
+  }
+
   return (
-    <div>
+    <div className="logs-shell">
       <div className="page-header">
         <div>
           <div className="page-title">Logs</div>
           <div className="page-subtitle">{logs.length} total task entries · sorted by latest</div>
         </div>
-        <button className="btn btn-secondary btn-sm" onClick={fetchLogs}>↻ Refresh</button>
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+          <button className="btn btn-secondary btn-sm" onClick={fetchLogs}>↻ Refresh</button>
+          <span className={`sync-pill ${syncStatus}`}>
+            <span className="badge-dot" />
+            {syncStatus === 'synced' ? 'Synced' : syncStatus === 'pending' ? 'Saving…' : 'Sync Failed'}
+          </span>
+        </div>
       </div>
 
       {error && (
@@ -150,15 +175,15 @@ export default function Logs() {
                     <td className="mono" style={{ color: 'var(--text-secondary)', fontSize: 12 }}>{log.inspection_id || '—'}</td>
                     <td style={{ fontWeight: 600 }}>{log.title || '—'}</td>
                     <td>
-                      <span className="badge badge-info">
+                      <span className={`badge ${getStateBadgeClass(log.resolved_state)}`}>
                         <span className="badge-dot" /> {log.resolved_state || '—'}
                       </span>
                     </td>
                     <td style={{ color: 'var(--text-secondary)', maxWidth: 360 }}>
-                      <span style={{ display: 'block', whiteSpace: 'pre-wrap' }}>{log.description || '—'}</span>
+                      <span className="logs-text-cell" title={log.description || ''}>{truncateText(log.description)}</span>
                     </td>
                     <td style={{ color: 'var(--text-secondary)', maxWidth: 360 }}>
-                      <span style={{ display: 'block', whiteSpace: 'pre-wrap' }}>{log.feedback || '—'}</span>
+                      <span className="logs-text-cell" title={log.feedback || ''}>{truncateText(log.feedback)}</span>
                     </td>
                     <td className="mono" style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{formatDate(log.created_at)}</td>
                   </tr>

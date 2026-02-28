@@ -45,14 +45,22 @@ export default function MachineParts() {
     String(part.serial_number ?? '').toLowerCase().includes(query)
   )
 
+  function truncateText(value, maxLength = 90) {
+    const text = String(value ?? '')
+    if (!text) return '—'
+    if (text.length <= maxLength) return text
+    return `${text.slice(0, maxLength)}...`
+  }
+
   return (
-    <div>
+    <div className="machine-parts-shell">
       <div className="page-header">
         <div>
           <div className="page-title">Machine Parts</div>
           <div className="page-subtitle">{parts.length} parts tracked</div>
         </div>
         <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+          <button className="btn btn-secondary btn-sm" onClick={fetchParts}>↻ Refresh</button>
           <span className={`sync-pill ${syncStatus}`}>
             <span className="badge-dot" />
             {syncStatus === 'synced' ? 'Synced' : syncStatus === 'pending' ? 'Saving…' : 'Sync Failed'}
@@ -119,7 +127,11 @@ export default function MachineParts() {
                   <tr key={part.id}>
                     <td className="mono" style={{ color: 'var(--text-muted)', fontSize: 12 }}>{part.id}</td>
                     <td style={{ fontWeight: 600 }}>{part.part_name || '—'}</td>
-                    <td style={{ color: 'var(--text-secondary)' }}>{part.part_description || '—'}</td>
+                    <td style={{ color: 'var(--text-secondary)' }}>
+                      <span className="machine-parts-description-cell" title={part.part_description || ''}>
+                        {truncateText(part.part_description)}
+                      </span>
+                    </td>
                     <td className="mono" style={{ color: 'var(--text-secondary)' }}>{part.serial_number || '—'}</td>
                     <td className="mono" style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{formatDate(part.created_at)}</td>
                   </tr>
