@@ -182,6 +182,28 @@ private final class ReportStore: ObservableObject {
         reports.insert(report, at: 0)
     }
 
+    func createSubmittedReport(
+        from inspection: FleetInspectionRecord,
+        reportURL: String,
+        summary: String
+    ) {
+        reports.removeAll(where: { $0.sourceInspectionID == inspection.id && $0.status == .draft })
+        let report = FleetReportRecord(
+            id: UUID(),
+            sourceInspectionID: inspection.id,
+            title: "Inspection Report \(inspection.assetName)",
+            fleetID: inspection.backendFleetID.map(String.init) ?? inspection.serialNumber,
+            inspectionDate: Self.formatDate(Date()),
+            status: .submitted,
+            pdfFileName: reportURL,
+            inspectorFeedback: summary,
+            legalSummary: inspection.generalInfo,
+            legalWitnessName: inspection.inspectorName,
+            legalCorrectiveActions: inspection.comments
+        )
+        reports.insert(report, at: 0)
+    }
+
     func updateInspectorFeedback(reportID: UUID, feedback: String) {
         guard let index = reports.firstIndex(where: { $0.id == reportID }) else { return }
         reports[index].inspectorFeedback = feedback
@@ -271,6 +293,8 @@ struct ContentView: View {
     @State private var selectedTab: RootTab = .fleet
     @State private var showGlobalSearch = false
     @State private var activeWorkflowInspectionID: UUID?
+    @State private var appLoadingMessage: String?
+    @State private var appErrorMessage: String?
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -281,11 +305,24 @@ struct ContentView: View {
                     onOpenSearch: { showGlobalSearch = true },
                     onGoToInspections: { selectedTab = .inspections },
                     onInspectFleet: { formData in
-                        let record = inspectionDB.createInspection(from: formData)
-                        activeWorkflowInspectionID = record.id
+                        appLoadingMessage = "Creating inspection..."
+                        defer { appLoadingMessage = nil }
+                        do {
+                            let record = try await inspectionDB.createInspectionFromBackend(from: formData)
+                            activeWorkflowInspectionID = record.id
+                        } catch {
+                            appErrorMessage = error.localizedDescription
+                            // For QR/backend flow, do not silently fallback to local default tasks.
+                            // This keeps task source strictly tied to fleet todo rows.
+                            if formData.backendFleetID == nil {
+                                let record = inspectionDB.createInspection(from: formData)
+                                activeWorkflowInspectionID = record.id
+                            }
+                        }
                     },
                     onStartTodayInspection: { inspection in
                         let seed = FleetInspectionFormData(
+                            backendFleetID: nil,
                             inspectorName: profileStore.profile.fullName,
                             assetName: inspection.itemName,
                             serialNumber: "",
@@ -324,6 +361,7 @@ struct ContentView: View {
                     },
                     onStartTodayInspection: { inspection in
                         let seed = FleetInspectionFormData(
+                            backendFleetID: nil,
                             inspectorName: profileStore.profile.fullName,
                             assetName: inspection.itemName,
                             serialNumber: "",
@@ -376,6 +414,22 @@ struct ContentView: View {
         }
         .tint(CATTheme.catYellow)
         .preferredColorScheme(isDarkModeEnabled ? .dark : .light)
+        .overlay {
+            if let appLoadingMessage {
+                CATBlockingLoadingOverlay(message: appLoadingMessage)
+            }
+        }
+        .alert(
+            "Backend Notice",
+            isPresented: Binding(
+                get: { appErrorMessage != nil },
+                set: { if !$0 { appErrorMessage = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) { appErrorMessage = nil }
+        } message: {
+            Text(appErrorMessage ?? "")
+        }
         .fullScreenCover(
             isPresented: Binding(
                 get: { activeWorkflowInspectionID != nil },
@@ -386,7 +440,9 @@ struct ContentView: View {
                 FleetInspectionWorkflowView(
                     inspectionID: inspectionID,
                     inspectionDB: inspectionDB,
-                    reportStore: reportStore
+                    reportStore: reportStore,
+                    appLoadingMessage: $appLoadingMessage,
+                    appErrorMessage: $appErrorMessage
                 ) {
                     activeWorkflowInspectionID = nil
                 }
@@ -411,7 +467,7 @@ private struct FleetHomeView: View {
     @ObservedObject var profileStore: InspectorProfileStore
     let onOpenSearch: () -> Void
     let onGoToInspections: () -> Void
-    let onInspectFleet: (FleetInspectionFormData) -> Void
+    let onInspectFleet: (FleetInspectionFormData) async -> Void
     let onStartTodayInspection: (InspectionItem) -> Void
     @StateObject private var locationService = LocationPrefillService()
     @State private var showingFleetScanner = false
@@ -1180,6 +1236,35 @@ private struct OfflineBanner: View {
     }
 }
 
+private struct CATBlockingLoadingOverlay: View {
+    let message: String
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.2).ignoresSafeArea()
+            VStack(spacing: 12) {
+                ProgressView()
+                    .tint(CATTheme.catYellow)
+                    .scaleEffect(1.1)
+                Text(message)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(CATTheme.heading)
+                    .multilineTextAlignment(.center)
+            }
+            .padding(18)
+            .frame(maxWidth: 260)
+            .background(
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(CATTheme.card)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14)
+                            .stroke(CATTheme.cardBorder, lineWidth: 1)
+                    )
+            )
+        }
+    }
+}
+
 // MARK: - Placeholder Screen
 
 private struct PlaceholderScreen: View {
@@ -1581,6 +1666,241 @@ private struct LegalReportFormView: View {
     }
 }
 
+private struct StructuredReportComposerView: View {
+    let inspection: FleetInspectionRecord
+    let onSubmit: (StructuredInspectionReportFormData) async -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var generalInfo: String
+    @State private var comments: String
+    @State private var taskInputs: [StructuredTaskReportInput]
+    @State private var signatureStrokes: [[CGPoint]] = []
+    @State private var isSubmitting = false
+
+    init(
+        inspection: FleetInspectionRecord,
+        onSubmit: @escaping (StructuredInspectionReportFormData) async -> Void
+    ) {
+        self.inspection = inspection
+        self.onSubmit = onSubmit
+        _generalInfo = State(initialValue: inspection.generalInfo)
+        _comments = State(initialValue: inspection.comments)
+        let seededTasks = inspection.tasks
+            .sorted(by: { $0.taskNumber < $1.taskNumber })
+            .map { task in
+                StructuredTaskReportInput(
+                    id: task.id,
+                    backendTaskID: task.backendTaskID,
+                    taskNumber: task.taskNumber,
+                    sourceTitle: task.title,
+                    summaryTitle: Self.prepopulateSummary(title: task.title, detail: task.detail),
+                    status: task.completed ? .pass : .monitor
+                )
+            }
+        _taskInputs = State(initialValue: seededTasks)
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                CreateSectionCard(title: "Inspection Snapshot", icon: "lock.shield.fill") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        nonEditableRow("Inspection Number", inspection.backendInspectionID.map(String.init) ?? inspection.id.uuidString)
+                        nonEditableRow("Serial Number (fleet_serial)", inspection.backendFleetID.map(String.init) ?? inspection.serialNumber)
+                        nonEditableRow("Inspector", inspection.inspectorName)
+                        nonEditableRow("Location", inspection.location.isEmpty ? "N/A" : inspection.location)
+                    }
+                }
+
+                CreateSectionCard(title: "General Info & Comments", icon: "text.alignleft") {
+                    VStack(spacing: 10) {
+                        CATTextEditorField(title: "General Info", text: $generalInfo, minHeight: 90)
+                        CATTextEditorField(title: "Comments", text: $comments, minHeight: 90)
+                    }
+                }
+
+                CreateSectionCard(title: "Task Status Matrix", icon: "list.bullet.clipboard.fill") {
+                    VStack(spacing: 10) {
+                        ForEach(taskInputs.indices, id: \.self) { index in
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Task \(taskInputs[index].taskNumber)")
+                                    .font(.caption.weight(.bold))
+                                    .foregroundStyle(CATTheme.muted)
+                                CATInputField(
+                                    title: "Summarized Title",
+                                    text: Binding(
+                                        get: { taskInputs[index].summaryTitle },
+                                        set: { taskInputs[index].summaryTitle = $0 }
+                                    )
+                                )
+                                Picker(
+                                    "Status",
+                                    selection: Binding(
+                                        get: { taskInputs[index].status },
+                                        set: { taskInputs[index].status = $0 }
+                                    )
+                                ) {
+                                    ForEach(TaskReportStatus.allCases, id: \.self) { state in
+                                        Text(state.rawValue).tag(state)
+                                    }
+                                }
+                                .pickerStyle(.segmented)
+                            }
+                            .padding(10)
+                            .background(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .fill(CATTheme.cardElevated)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 10)
+                                            .stroke(CATTheme.cardBorder, lineWidth: 1)
+                                    )
+                            )
+                        }
+                    }
+                }
+
+                CreateSectionCard(title: "Digital Signature", icon: "signature") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Sign in the area below.")
+                            .font(.caption)
+                            .foregroundStyle(CATTheme.body)
+                        SignaturePadView(strokes: $signatureStrokes)
+                            .frame(height: 160)
+                        HStack {
+                            Spacer()
+                            Button("Clear Signature") {
+                                signatureStrokes.removeAll()
+                            }
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(CATTheme.warning)
+                        }
+                    }
+                }
+
+                Button {
+                    let signatureVector = SignatureVectorEncoder.encode(strokes: signatureStrokes)
+                    let payload = StructuredInspectionReportFormData(
+                        generalInfo: generalInfo,
+                        comments: comments,
+                        taskInputs: taskInputs,
+                        signatureVector: signatureVector
+                    )
+                    isSubmitting = true
+                    Task {
+                        await onSubmit(payload)
+                        isSubmitting = false
+                    }
+                } label: {
+                    HStack(spacing: 8) {
+                        if isSubmitting {
+                            ProgressView().tint(CATTheme.catBlack)
+                        } else {
+                            Image(systemName: "paperplane.fill")
+                        }
+                        Text(isSubmitting ? "Submitting..." : "Submit Report")
+                            .fontWeight(.bold)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 48)
+                    .foregroundStyle(CATTheme.catBlack)
+                    .background(CATTheme.headerGradient)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+                .disabled(signatureStrokes.isEmpty || isSubmitting)
+                .opacity(signatureStrokes.isEmpty || isSubmitting ? 0.55 : 1.0)
+            }
+            .padding(16)
+        }
+        .background(CATTheme.background.ignoresSafeArea())
+        .navigationTitle("Generate Report")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button("Close") { dismiss() }
+                    .foregroundStyle(CATTheme.catYellow)
+            }
+        }
+    }
+
+    private func nonEditableRow(_ title: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(CATTheme.muted)
+            Text(value.isEmpty ? "N/A" : value)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(CATTheme.heading)
+        }
+    }
+
+    private static func prepopulateSummary(title: String, detail: String) -> String {
+        // LLM prepopulate hook: replace with AI summary endpoint when available.
+        let seed = title.isEmpty ? detail : title
+        let trimmed = seed.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.count <= 56 { return trimmed }
+        let end = trimmed.index(trimmed.startIndex, offsetBy: 56)
+        return String(trimmed[..<end]) + "..."
+    }
+}
+
+private struct SignaturePadView: View {
+    @Binding var strokes: [[CGPoint]]
+    @State private var activeStroke: [CGPoint] = []
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack {
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(CATTheme.cardElevated)
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(CATTheme.cardBorder, lineWidth: 1)
+
+                Path { path in
+                    for stroke in strokes {
+                        guard let first = stroke.first else { continue }
+                        path.move(to: first)
+                        for point in stroke.dropFirst() {
+                            path.addLine(to: point)
+                        }
+                    }
+                    if let first = activeStroke.first {
+                        path.move(to: first)
+                        for point in activeStroke.dropFirst() {
+                            path.addLine(to: point)
+                        }
+                    }
+                }
+                .stroke(CATTheme.heading, style: StrokeStyle(lineWidth: 2.2, lineCap: .round, lineJoin: .round))
+            }
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        let point = CGPoint(
+                            x: min(max(0, value.location.x), geo.size.width),
+                            y: min(max(0, value.location.y), geo.size.height)
+                        )
+                        activeStroke.append(point)
+                    }
+                    .onEnded { _ in
+                        if !activeStroke.isEmpty {
+                            strokes.append(activeStroke)
+                        }
+                        activeStroke = []
+                    }
+            )
+        }
+    }
+}
+
+private enum SignatureVectorEncoder {
+    static func encode(strokes: [[CGPoint]]) -> String {
+        let rows = strokes.map { stroke in
+            stroke.map { point in "\(Int(point.x)),\(Int(point.y))" }.joined(separator: ";")
+        }
+        return rows.joined(separator: "|")
+    }
+}
+
 private struct GlobalSearchScreen: View {
     @ObservedObject var viewModel: DashboardViewModel
     @ObservedObject var inspectionDB: InspectionDatabase
@@ -1788,10 +2108,13 @@ private func reportPDFURL(fileName: String) -> URL? {
 private struct CreateInspectionView: View {
     @Environment(\.dismiss) private var dismiss
     let inspectorName: String
-    let onInspectFleet: (FleetInspectionFormData) -> Void
+    let onInspectFleet: (FleetInspectionFormData) async -> Void
     @State private var showingScanner = false
     @State private var scanMode: ScanMode = .assetQR
+    @State private var isSubmitting = false
 
+    @State private var backendFleetID: Int64?
+    @State private var fleetName = ""
     @State private var serialNumber = ""
     @State private var model = ""
     @State private var serviceMeterValue = ""
@@ -1811,18 +2134,11 @@ private struct CreateInspectionView: View {
     @State private var generalInfo = ""
     @State private var comments = ""
 
-    @State private var walkaroundSafetyDecals = false
-    @State private var walkaroundLeaks = false
-    @State private var walkaroundTiresTracks = false
-    @State private var walkaroundAttachments = false
-    @State private var walkaroundLights = false
-    @State private var walkaroundNotes = ""
-
     init(
         initialLocation: String = "",
         initialLocationMode: InspectionLocationMode = .input,
         inspectorName: String,
-        onInspectFleet: @escaping (FleetInspectionFormData) -> Void
+        onInspectFleet: @escaping (FleetInspectionFormData) async -> Void
     ) {
         self.inspectorName = inspectorName
         self.onInspectFleet = onInspectFleet
@@ -1875,6 +2191,7 @@ private struct CreateInspectionView: View {
 
                 CreateSectionCard(title: "Customer & Asset Info", icon: "shippingbox.fill") {
                     VStack(spacing: 10) {
+                        CATInputField(title: "Fleet Name", text: $fleetName)
                         CATInputField(title: "Serial Number", text: $serialNumber)
                         CATInputField(title: "Model", text: $model)
                         CATInputField(title: "Service Meter Value", text: $serviceMeterValue, keyboardType: .decimalPad)
@@ -1973,44 +2290,43 @@ private struct CreateInspectionView: View {
                     }
                 }
 
-                CreateSectionCard(title: "Walk Arounds", icon: "figure.walk") {
-                    VStack(alignment: .leading, spacing: 8) {
-                        CATChecklistRow(title: "Safety Decals / Labels", isOn: $walkaroundSafetyDecals)
-                        CATChecklistRow(title: "Leaks / Hoses / Connections", isOn: $walkaroundLeaks)
-                        CATChecklistRow(title: "Tires / Tracks Condition", isOn: $walkaroundTiresTracks)
-                        CATChecklistRow(title: "Attachments / Couplers", isOn: $walkaroundAttachments)
-                        CATChecklistRow(title: "Lights / Signals", isOn: $walkaroundLights)
-                        CATTextEditorField(title: "Walk Around Notes", text: $walkaroundNotes, minHeight: 72)
-                    }
-                }
-
                 Button {
-                    onInspectFleet(
-                        FleetInspectionFormData(
-                            inspectorName: inspectorName,
-                            assetName: model.isEmpty ? "Fleet Asset" : model,
-                            serialNumber: serialNumber,
-                            model: model,
-                            serviceMeterValue: serviceMeterValue,
-                            productFamily: productFamily,
-                            make: make,
-                            assetID: assetID,
-                            location: locationText,
-                            customerUCID: ucid,
-                            customerName: customerName,
-                            customerPhone: customerPhone,
-                            customerEmail: customerEmail,
-                            workOrderNumber: workOrderNumber,
-                            additionalEmails: additionalEmails,
-                            generalInfo: generalInfo,
-                            comments: comments
+                    isSubmitting = true
+                    Task {
+                        await onInspectFleet(
+                            FleetInspectionFormData(
+                                backendFleetID: backendFleetID,
+                                inspectorName: inspectorName,
+                                assetName: fleetName.isEmpty ? (model.isEmpty ? "Fleet Asset" : model) : fleetName,
+                                serialNumber: serialNumber,
+                                model: model,
+                                serviceMeterValue: serviceMeterValue,
+                                productFamily: productFamily,
+                                make: make,
+                                assetID: assetID,
+                                location: locationText,
+                                customerUCID: ucid,
+                                customerName: customerName,
+                                customerPhone: customerPhone,
+                                customerEmail: customerEmail,
+                                workOrderNumber: workOrderNumber,
+                                additionalEmails: additionalEmails,
+                                generalInfo: generalInfo,
+                                comments: comments
+                            )
                         )
-                    )
-                    dismiss()
+                        isSubmitting = false
+                        dismiss()
+                    }
                 } label: {
                     HStack(spacing: 8) {
-                        Image(systemName: "square.and.arrow.down.fill")
-                        Text("Inspect Fleet")
+                        if isSubmitting {
+                            ProgressView()
+                                .tint(CATTheme.catBlack)
+                        } else {
+                            Image(systemName: "square.and.arrow.down.fill")
+                        }
+                        Text(isSubmitting ? "Creating..." : "Inspect Fleet")
                             .fontWeight(.bold)
                     }
                     .frame(maxWidth: .infinity, minHeight: 48)
@@ -2018,6 +2334,8 @@ private struct CreateInspectionView: View {
                     .background(CATTheme.headerGradient)
                     .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
+                .disabled(isSubmitting)
+                .opacity(isSubmitting ? 0.7 : 1.0)
                 .padding(.top, 2)
             }
             .padding(16)
@@ -2051,17 +2369,30 @@ private struct CreateInspectionView: View {
                 serialNumber = value
             }
         case .assetQR:
-            let parsed = parseScannedPairs(value)
+            let parsed = parseScannedFleetJSON(value) ?? parseScannedPairs(value)
+            if let idValue = parsed["ID"], let id = Int64(idValue) {
+                backendFleetID = id
+            }
+            if backendFleetID == nil, let serialID = parsed["FLEETSERIAL"], let id = Int64(serialID) {
+                backendFleetID = id
+            }
+            if let val = parsed["NAME"], model.isEmpty { model = val }
+            if let val = parsed["NAME"] { fleetName = val }
             if let val = parsed["SN"] ?? parsed["SERIAL"] ?? parsed["SERIALNUMBER"] { serialNumber = val }
             if let val = parsed["MODEL"] { model = val }
             if let val = parsed["SMU"] ?? parsed["SERVICEMETER"] { serviceMeterValue = val }
-            if let val = parsed["FAMILY"] ?? parsed["PRODUCTFAMILY"] { productFamily = val }
+            if let val = parsed["FAMILY"] ?? parsed["PRODUCTFAMILY"] ?? parsed["TYPE"] { productFamily = val }
             if let val = parsed["MAKE"] { make = val }
             if let val = parsed["ASSET"] ?? parsed["ASSETID"] { assetID = val }
             if let val = parsed["LOCATION"] {
                 locationText = val
                 locationMode = .input
             }
+            if let val = parsed["CUSTOMERNAME"] { customerName = val }
+            if let val = parsed["CUSTOMERID"] ?? parsed["UCID"] { ucid = val }
+            if let val = parsed["WORKORDER"] ?? parsed["WORKORDERNUMBER"] { workOrderNumber = val }
+            if let val = parsed["CUSTOMEREMAIL"] { customerEmail = val }
+            if let val = parsed["CUSTOMERPHONE"] { customerPhone = val }
             if parsed.isEmpty {
                 if serialNumber.isEmpty {
                     serialNumber = value
@@ -2081,6 +2412,56 @@ private struct CreateInspectionView: View {
             map[pair[0].uppercased().replacingOccurrences(of: " ", with: "")] = pair[1].trimmingCharacters(in: .whitespaces)
         }
         return map
+    }
+
+    private func parseScannedFleetJSON(_ value: String) -> [String: String]? {
+        let normalized = normalizeScannedJSONPayload(value)
+        guard let data = normalized.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) else {
+            return nil
+        }
+
+        let dictionary: [String: Any]
+        if let map = object as? [String: Any] {
+            dictionary = map
+        } else if let array = object as? [[String: Any]], let first = array.first {
+            dictionary = first
+        } else {
+            return nil
+        }
+
+        var output: [String: String] = [:]
+        for (key, raw) in dictionary {
+            let normalized = key.uppercased().replacingOccurrences(of: "_", with: "")
+            if let stringValue = raw as? String {
+                output[normalized] = stringValue
+            } else if let numberValue = raw as? NSNumber {
+                output[normalized] = numberValue.stringValue
+            } else if let dictValue = raw as? [String: Any] {
+                for (nestedKey, nestedRaw) in dictValue {
+                    let nestedNorm = "\(normalized)\(nestedKey.uppercased().replacingOccurrences(of: "_", with: ""))"
+                    if let nestedString = nestedRaw as? String {
+                        output[nestedNorm] = nestedString
+                    } else if let nestedNumber = nestedRaw as? NSNumber {
+                        output[nestedNorm] = nestedNumber.stringValue
+                    }
+                }
+            }
+        }
+        return output
+    }
+
+    private func normalizeScannedJSONPayload(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count >= 2 else { return trimmed }
+        if (trimmed.hasPrefix("\"") && trimmed.hasSuffix("\"")) ||
+            (trimmed.hasPrefix("'") && trimmed.hasSuffix("'")) {
+            let start = trimmed.index(after: trimmed.startIndex)
+            let end = trimmed.index(before: trimmed.endIndex)
+            let inner = String(trimmed[start..<end])
+            return inner.replacingOccurrences(of: "\\\"", with: "\"")
+        }
+        return trimmed
     }
 }
 
@@ -2239,6 +2620,8 @@ private struct FleetInspectionWorkflowView: View {
     let inspectionID: UUID
     @ObservedObject var inspectionDB: InspectionDatabase
     @ObservedObject var reportStore: ReportStore
+    @Binding var appLoadingMessage: String?
+    @Binding var appErrorMessage: String?
     let onClose: () -> Void
 
     @StateObject private var cameraService = FleetCameraService()
@@ -2249,7 +2632,7 @@ private struct FleetInspectionWorkflowView: View {
     @State private var capturedPhotoFileNames: [String] = []
     @State private var selectedPreviewPhotoFileName: String?
     @State private var sendStatusText = ""
-    @State private var showLegalReportForm = false
+    @State private var showReportComposer = false
 
     private var record: FleetInspectionRecord? {
         inspectionDB.record(for: inspectionID)
@@ -2308,13 +2691,23 @@ private struct FleetInspectionWorkflowView: View {
         )) { item in
             PhotoPreviewSheet(fileName: item.fileName)
         }
-        .sheet(isPresented: $showLegalReportForm) {
+        .sheet(isPresented: $showReportComposer) {
             if let record {
                 NavigationStack {
-                    LegalReportFormView(inspection: record) { form in
-                        reportStore.createSubmittedReport(from: record, legal: form)
-                        showLegalReportForm = false
-                        onClose()
+                    StructuredReportComposerView(inspection: record) { form in
+                        appLoadingMessage = "Submitting report..."
+                        do {
+                            let result = try await inspectionDB.submitStructuredReport(for: inspectionID, form: form)
+                            let summary = "Submitted report #\(result.reportID)"
+                            reportStore.createSubmittedReport(from: record, reportURL: result.reportURL, summary: summary)
+                            sendStatusText = "Report submitted."
+                            appLoadingMessage = nil
+                            showReportComposer = false
+                            onClose()
+                        } catch {
+                            appLoadingMessage = nil
+                            appErrorMessage = error.localizedDescription
+                        }
                     }
                 }
             }
@@ -2453,7 +2846,7 @@ private struct FleetInspectionWorkflowView: View {
                         )
                 }
                 Button {
-                    showLegalReportForm = true
+                    showReportComposer = true
                 } label: {
                     Label("Generate Report", systemImage: "doc.badge.plus")
                         .font(.subheadline.weight(.bold))
@@ -2515,6 +2908,16 @@ private struct FleetInspectionWorkflowView: View {
             Text(task.detail)
                 .font(.caption)
                 .foregroundStyle(CATTheme.body)
+            if task.backendSyncStatus == "failed" {
+                Text("Backend sync failed: \(task.backendError)")
+                    .font(.caption2)
+                    .foregroundStyle(CATTheme.warning)
+                    .lineLimit(2)
+            } else if task.backendSyncStatus == "synced" {
+                Text("Synced to backend")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(CATTheme.success)
+            }
 
             if !task.started {
                 Button {
@@ -2554,7 +2957,7 @@ private struct FleetInspectionWorkflowView: View {
                         }
                     } label: {
                         Label(
-                            voiceService.isRecording ? "Stop Talking" : "Start Talking",
+                            voiceService.isRecording ? "Stop Capture Voice" : "Capture Voice",
                             systemImage: voiceService.isRecording ? "stop.circle.fill" : "mic.fill"
                         )
                         .font(.caption.weight(.bold))
@@ -2596,14 +2999,16 @@ private struct FleetInspectionWorkflowView: View {
                             feedbackText: feedbackText,
                             photoFileName: capturedPhotoFileNames.last
                         )
-                        inspectionDB.saveTaskFeedback(
+                        appLoadingMessage = "Submitting task \(task.taskNumber)..."
+                        let syncStatus = await inspectionDB.saveTaskFeedbackAndSync(
                             inspectionID: inspectionID,
                             taskID: task.id,
                             feedbackText: feedbackText,
                             photoFileNames: capturedPhotoFileNames,
                             audioFileName: audioFileName
                         )
-                        sendStatusText = "Feedback sent for Task \(task.taskNumber)"
+                        appLoadingMessage = nil
+                        sendStatusText = "Task \(task.taskNumber): \(syncStatus)"
                         if let nextTaskID = nextTaskID(after: task.id) {
                             selectedTaskID = nextTaskID
                         }
@@ -2836,7 +3241,7 @@ private final class VoiceFeedbackService: NSObject, ObservableObject, AVAudioRec
             stopRecording()
         }
         guard let audioFile = currentFileName else { return nil }
-        _ = await streamToBackend(
+        _ = await submitToBackend(
             inspectionID: inspectionID,
             taskID: taskID,
             feedbackText: feedbackText,
@@ -2863,14 +3268,14 @@ private final class VoiceFeedbackService: NSObject, ObservableObject, AVAudioRec
         isRecording = true
     }
 
-    private func streamToBackend(
+    private func submitToBackend(
         inspectionID: UUID,
         taskID: UUID,
         feedbackText: String,
         photoFileName: String?,
         audioFileName: String
     ) async -> Bool {
-        // Backend streaming hook: replace with actual API websocket/stream call.
+        // Backend submission hook: replace with your inspection feedback API call.
         // Send inspectionID, taskID, feedbackText, photo file, and audio file.
         try? await Task.sleep(nanoseconds: 350_000_000)
         return true
@@ -2899,6 +3304,7 @@ private struct InspectionScannerView: View {
     let onScanned: (String) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var manualCode = ""
+    @State private var didHandleScan = false
 
     private var supportedTypes: Set<DataScannerViewController.RecognizedDataType> {
         switch mode {
@@ -2913,8 +3319,7 @@ private struct InspectionScannerView: View {
         VStack(spacing: 14) {
             if DataScannerViewController.isSupported && DataScannerViewController.isAvailable {
                 ScannerRepresentable(recognizedDataTypes: supportedTypes) { value in
-                    onScanned(value)
-                    dismiss()
+                    handleScannedValue(value)
                 }
                 .frame(height: 300)
                 .clipShape(RoundedRectangle(cornerRadius: 12))
@@ -2934,8 +3339,7 @@ private struct InspectionScannerView: View {
 
             CATInputField(title: mode == .assetQR ? "Asset QR Value" : "CAT PIN Value", text: $manualCode)
             Button {
-                onScanned(manualCode)
-                dismiss()
+                handleScannedValue(manualCode)
             } label: {
                 HStack(spacing: 8) {
                     Image(systemName: "checkmark.circle.fill")
@@ -2965,6 +3369,18 @@ private struct InspectionScannerView: View {
         .toolbarBackground(CATTheme.catCharcoal, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
     }
+
+    private func handleScannedValue(_ value: String) {
+        guard !didHandleScan else { return }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        didHandleScan = true
+        onScanned(trimmed)
+        // Delay dismiss very slightly so scanner can settle and avoid camera pipeline asserts.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+            dismiss()
+        }
+    }
 }
 
 private struct ScannerRepresentable: UIViewControllerRepresentable {
@@ -2973,6 +3389,7 @@ private struct ScannerRepresentable: UIViewControllerRepresentable {
 
     final class Coordinator: NSObject, DataScannerViewControllerDelegate {
         private let onScan: (String) -> Void
+        private var didEmitScan = false
 
         init(onScan: @escaping (String) -> Void) {
             self.onScan = onScan
@@ -2983,7 +3400,7 @@ private struct ScannerRepresentable: UIViewControllerRepresentable {
             didTapOn item: RecognizedItem
         ) {
             if case .barcode(let barcode) = item, let payload = barcode.payloadStringValue {
-                onScan(payload)
+                emitIfNeeded(payload, scanner: dataScanner)
             }
         }
 
@@ -2994,8 +3411,15 @@ private struct ScannerRepresentable: UIViewControllerRepresentable {
         ) {
             guard let first = addedItems.first else { return }
             if case .barcode(let barcode) = first, let payload = barcode.payloadStringValue {
-                onScan(payload)
+                emitIfNeeded(payload, scanner: dataScanner)
             }
+        }
+
+        private func emitIfNeeded(_ payload: String, scanner: DataScannerViewController) {
+            guard !didEmitScan else { return }
+            didEmitScan = true
+            scanner.stopScanning()
+            onScan(payload)
         }
     }
 
