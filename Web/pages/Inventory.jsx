@@ -136,6 +136,7 @@ export default function Inventory() {
           <div className="search-bar">
             <span className="search-icon">⌕</span>
             <input
+              className="report-search-input"
               placeholder="Search by fleet serial, part number, part name, or component tag…"
               value={search}
               onChange={e => setSearch(e.target.value)}

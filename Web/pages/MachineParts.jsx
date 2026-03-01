@@ -112,6 +112,7 @@ export default function MachineParts() {
           <div className="search-bar">
             <span className="search-icon">⌕</span>
             <input
+              className="report-search-input"
               placeholder="Search parts by id, name, description, or serial number…"
               value={search}
               onChange={e => setSearch(e.target.value)}

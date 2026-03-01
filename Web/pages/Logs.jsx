@@ -155,6 +155,7 @@ export default function Logs() {
           <div className="search-bar">
             <span className="search-icon">⌕</span>
             <input
+              className="report-search-input"
               placeholder="Search by id, fleet, inspection, title, state, description, or feedback…"
               value={search}
               onChange={e => setSearch(e.target.value)}

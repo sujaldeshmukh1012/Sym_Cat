@@ -126,6 +126,7 @@ export default function OrderCart() {
           <div className="search-bar">
             <span className="search-icon">⌕</span>
             <input
+              className="report-search-input"
               placeholder="Search by order id, inspection id, part id, quantity, urgency, or status…"
               value={search}
               onChange={e => setSearch(e.target.value)}
