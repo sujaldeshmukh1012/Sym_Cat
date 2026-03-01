@@ -32,9 +32,13 @@ FALLBACK_CATALOG: dict[str, list[dict]] = {
 
 
 def _lookup_from_supabase(component_tag: str) -> list[dict] | None:
-    """Query inventory table for parts matching the anomaly component."""
+    """Query inventory table for parts matching the anomaly component.
+    Returns None silently when supabase is unavailable (e.g. Modal container)."""
     try:
         from db import get_supabase
+    except (ImportError, ModuleNotFoundError):
+        return None  # supabase not installed — use fallback catalog silently
+    try:
         sb = get_supabase()
         resp = (
             sb.table("inventory")

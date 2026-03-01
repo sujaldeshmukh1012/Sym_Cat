@@ -1,7 +1,11 @@
 """
 Routing layer: identify component from image (and optional voice hint), then select
 the correct SubSection Prompt. Prevents FAIL 1 (wrong prompt for the image).
-Analyzer is only called after this step with image + correct prompt.
+
+Speed optimizations:
+- Text-hint fast path: when voice hint clearly names a component, skip GPU classify entirely
+- Expanded hint vocabulary covers ~50 phrases across 7 component categories
+- GPU classify is only called when hint is ambiguous or missing
 """
 import base64
 
@@ -33,15 +37,32 @@ PROMPT_MAP = {
 
 VALID_COMPONENTS = [c for c in PROMPT_MAP if c != "Unknown"]
 
-# Strong hint phrases → component (user said "radiator hose" etc. → use Cooling System)
+# Expanded hint vocabulary — when voice hint matches, GPU classify is skipped entirely
 HINT_TO_COMPONENT = [
-    (["radiator hose", "radiator hoses", "coolant hose", "cooling hose", "upper radiator", "lower radiator", "coolant leak", "cooling system hose"], "Cooling System"),
-    (["ladder", "access ladder", "steps", "handrail", "guardrail"], "Steps/Handrails"),
-    (["tire", "tyre", "rim", "wheel bolt", "wheel nut"], "Tires/Rims"),
-    (["hydraulic", "cylinder", "hydraulics"], "Hydraulics"),
-    (["engine", "engine block", "belt", "oil leak"], "Engine"),
-    (["track", "undercarriage", "roller", "sprocket"], "Undercarriage"),
-    (["cab", "glass", "mirror"], "Cab/Glass"),
+    (["radiator hose", "radiator hoses", "coolant hose", "cooling hose",
+      "upper radiator", "lower radiator", "coolant leak", "cooling system hose",
+      "radiator", "coolant", "cooling system", "cooling fan", "water pump",
+      "coolant line", "coolant reservoir", "thermostat"], "Cooling System"),
+    (["ladder", "access ladder", "steps", "handrail", "guardrail",
+      "grab rail", "grab bar", "rung", "access steps", "step",
+      "hand rail", "guard rail", "entry steps", "entry ladder"], "Steps/Handrails"),
+    (["tire", "tyre", "rim", "wheel bolt", "wheel nut", "lug nut",
+      "lug bolt", "wheel", "tires", "rims", "wheel hardware",
+      "flat tire", "tire tread", "valve stem", "tire pressure"], "Tires/Rims"),
+    (["hydraulic", "cylinder", "hydraulics", "hydraulic hose",
+      "hydraulic line", "hydraulic pump", "boom cylinder",
+      "hydraulic fitting", "hydraulic reservoir", "hydraulic leak",
+      "hydraulic fluid", "hydraulic seal"], "Hydraulics"),
+    (["engine", "engine block", "belt", "oil leak", "engine oil",
+      "serpentine belt", "air filter", "fuel filter", "oil pan",
+      "engine bay", "motor", "diesel engine", "turbo", "turbocharger",
+      "exhaust", "fuel injector"], "Engine"),
+    (["track", "undercarriage", "roller", "sprocket", "idler",
+      "track shoe", "track chain", "track roller", "carrier roller",
+      "track tension", "track pad", "track link"], "Undercarriage"),
+    (["cab", "glass", "mirror", "windshield", "window", "door seal",
+      "wiper", "cab door", "rear window", "side window", "side mirror",
+      "rops", "fops", "cab glass"], "Cab/Glass"),
 ]
 
 
@@ -54,13 +75,20 @@ class Router:
     def identify(self, image_bytes: bytes, voice_hint: str = "") -> tuple[str, str | None]:
         """
         Returns (component, subsection_prompt).
-        Image classification wins; if the LLM misclassifies (e.g. hose as Engine) and the
-        user gave a specific hint (e.g. "radiator hose"), we override to the hinted component.
+        FAST PATH: If voice hint clearly names a component, skip GPU classify entirely.
+        SLOW PATH: If hint is ambiguous/missing, call GPU classify_component, then apply overrides.
         """
         hint_lower = (voice_hint or "").strip().lower()
+
+        # --- FAST PATH: strong text hint → skip GPU entirely (saves 5-10s) ---
+        if hint_lower:
+            for phrases, component in HINT_TO_COMPONENT:
+                if any(p in hint_lower for p in phrases):
+                    return (component, PROMPT_MAP[component])
+
+        # --- SLOW PATH: need GPU classification ---
         inspector = Inspector()
         image_b64 = base64.b64encode(image_bytes).decode("ascii")
-        # Use dedicated classifier so routing is independent of inspection prompt
         raw = inspector.classify_component.remote(
             image_b64,
             text_hint=voice_hint or "",
@@ -71,16 +99,10 @@ class Router:
             if valid.lower() == text.lower() or valid in text:
                 component_from_image = valid
                 break
-        if component_from_image is None and ("Unknown" in text or not text):
-            # Unknown from image: use hint if it clearly names a component
-            for phrases, component in HINT_TO_COMPONENT:
-                if any(p in hint_lower for p in phrases):
-                    return (component, PROMPT_MAP[component])
-            return ("Unknown", None)
         if component_from_image is None:
             return ("Unknown", None)
 
-        # User hint overrides when they clearly name a component (avoids misclassification)
+        # Safety overrides: image + hint disagreement
         if component_from_image == "Engine" and any(
             p in hint_lower for p in ["radiator", "hose", "coolant", "cooling system", "cooling hose"]
         ):
