@@ -2767,6 +2767,9 @@ private struct FleetInspectionWorkflowView: View {
     @State private var liveUserSnippet = ""
     @State private var liveAISentence = ""
     @State private var photoFeedbackCount: Int = 0
+    @State private var aiTranscriptEntries: [String] = []
+    @State private var lastAssistantTranscriptSnapshot = ""
+    @State private var lastFinalUserText = ""
 
     // Bottom card collapse state
     @State private var isCardCollapsed = false
@@ -3234,18 +3237,20 @@ private struct FleetInspectionWorkflowView: View {
         dismissKeyboard()
         isTaskSyncing = true
         voiceService.stopLiveListening()
+        let submissionFeedback = prepareFeedbackForSubmission()
+        feedbackText = submissionFeedback
         Task {
             let audioFileName = await voiceService.stopAndStream(
                 inspectionID: inspectionID,
                 taskID: task.id,
-                feedbackText: feedbackText,
+                feedbackText: submissionFeedback,
                 photoFileName: capturedPhotoFileNames.last
             )
             appLoadingMessage = "Submitting task \(task.taskNumber)..."
             let syncStatus = await inspectionDB.saveTaskFeedbackAndSync(
                 inspectionID: inspectionID,
                 taskID: task.id,
-                feedbackText: feedbackText,
+                feedbackText: submissionFeedback,
                 photoFileNames: capturedPhotoFileNames,
                 audioFileName: audioFileName,
                 walkthroughStatus: selectedWalkthroughStatus
@@ -3265,6 +3270,9 @@ private struct FleetInspectionWorkflowView: View {
         selectedWalkthroughStatus = task.walkthroughStatus
         capturedPhotoFileNames = task.photoFileNames
         photoFeedbackCount = 0
+        aiTranscriptEntries = []
+        lastAssistantTranscriptSnapshot = ""
+        lastFinalUserText = ""
         selectedPreviewPhotoFileName = nil
         if task.started && !task.completed {
             beginLiveAI(for: task.id)
@@ -3295,6 +3303,8 @@ private struct FleetInspectionWorkflowView: View {
 
     private func beginLiveAI(for taskID: UUID) {
         dismissKeyboard()
+        lastAssistantTranscriptSnapshot = ""
+        lastFinalUserText = ""
         let task = record?.tasks.first(where: { $0.id == taskID })
         liveVoiceStatus = "Connecting live AI..."
         liveUserSnippet = ""
@@ -3337,18 +3347,45 @@ private struct FleetInspectionWorkflowView: View {
                 if !text.isEmpty {
                     liveUserSnippet = ""
                 }
+                appendAssistantTranscript(normalizeAssistantText(text))
                 updateLiveAISentence(text)
+            case .assistantAudioText(let text):
+                appendAITranscriptEntry(text)
+                if !text.isEmpty {
+                    updateLiveAISentence(text)
+                }
             case .userText(let text):
                 if !text.isEmpty {
                     liveAISentence = ""
                 }
                 updateLiveUserSnippet(text)
-            case .transcriptChunk(let chunk):
-                appendTranscribedFeedback(chunk)
-                liveVoiceStatus = "Transcribing..."
+            case .finalUserText(let text):
+                let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !cleaned.isEmpty, cleaned != lastFinalUserText {
+                    lastFinalUserText = cleaned
+                    if !feedbackText.isEmpty && !feedbackText.hasSuffix("\n") && !feedbackText.hasSuffix(" ") {
+                        feedbackText += "\n"
+                    }
+                    feedbackText += "Inspector: " + cleaned
+                }
             case .imageFeedback(let text):
                 liveVoiceStatus = "Image analysis received."
                 appendFeedbackBullet(text)
+                appendAITranscriptEntry(
+                    text
+                        .replacingOccurrences(of: "\\n", with: "\n")
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                )
+            case .soundAnomaly(let text):
+                liveVoiceStatus = "⚠️ Acoustic anomaly detected!"
+                let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !cleaned.isEmpty {
+                    if !feedbackText.isEmpty && !feedbackText.hasSuffix("\n") {
+                        feedbackText += "\n"
+                    }
+                    feedbackText += "🔊 Acoustic Alert:\n" + cleaned
+                    appendAITranscriptEntry("Acoustic: " + cleaned)
+                }
             case .submitTask:
                 liveVoiceStatus = "Submitting task..."
                 submitCurrentTask()
@@ -3362,18 +3399,20 @@ private struct FleetInspectionWorkflowView: View {
         guard let task = currentTask, !isTaskSyncing else { return }
         isTaskSyncing = true
         voiceService.stopLiveListening()
+        let submissionFeedback = prepareFeedbackForSubmission()
+        feedbackText = submissionFeedback
         Task {
             let audioFileName = await voiceService.stopAndStream(
                 inspectionID: inspectionID,
                 taskID: task.id,
-                feedbackText: feedbackText,
+                feedbackText: submissionFeedback,
                 photoFileName: capturedPhotoFileNames.last
             )
             appLoadingMessage = "Submitting task \(task.taskNumber)..."
             let syncStatus = await inspectionDB.saveTaskFeedbackAndSync(
                 inspectionID: inspectionID,
                 taskID: task.id,
-                feedbackText: feedbackText,
+                feedbackText: submissionFeedback,
                 photoFileNames: capturedPhotoFileNames,
                 audioFileName: audioFileName,
                 walkthroughStatus: selectedWalkthroughStatus
@@ -3425,6 +3464,113 @@ private func appendFeedbackBullet(_ value: String) {
     feedbackText = feedbackText.isEmpty ? block : feedbackText + "\n\n" + block
 }
 
+    private func appendAssistantTranscript(_ text: String) {
+        let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty else { return }
+
+        if cleaned.hasPrefix(lastAssistantTranscriptSnapshot) {
+            let delta = String(cleaned.dropFirst(lastAssistantTranscriptSnapshot.count))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !delta.isEmpty {
+                appendAITranscriptEntry(delta)
+            }
+        } else if !lastAssistantTranscriptSnapshot.hasPrefix(cleaned) {
+            appendAITranscriptEntry(cleaned)
+        }
+
+        lastAssistantTranscriptSnapshot = cleaned
+    }
+
+    private func appendAITranscriptEntry(_ text: String) {
+        let cleaned = text
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty else { return }
+
+        if aiTranscriptEntries.last?.caseInsensitiveCompare(cleaned) == .orderedSame {
+            return
+        }
+        aiTranscriptEntries.append(cleaned)
+        
+        if !feedbackText.isEmpty && !feedbackText.hasSuffix("\n") && !feedbackText.hasSuffix(" ") {
+            feedbackText += "\n"
+        }
+        feedbackText += "AI: " + cleaned
+    }
+
+    private func prepareFeedbackForSubmission() -> String {
+        let summary = summarizeFeedbackText(feedbackText)
+        let marker = "\n\n--- Summary ---\n"
+
+        var base = feedbackText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let summaryRange = base.range(of: marker) {
+            base = String(base[..<summaryRange.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        guard !summary.isEmpty else { return base }
+
+        let summaryBlock = "--- Summary ---\n\(summary)"
+        if base.isEmpty {
+            return summaryBlock
+        }
+        return "\(base)\n\n\(summaryBlock)"
+    }
+
+    private func summarizeFeedbackText(_ text: String) -> String {
+        let lines = text.components(separatedBy: .newlines)
+            .flatMap { $0.components(separatedBy: ". ") }
+            .map {
+                $0.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+                  .trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            .filter { !$0.isEmpty }
+
+        guard !lines.isEmpty else { return "" }
+
+        var seen = Set<String>()
+        var unique: [String] = []
+        for line in lines {
+            let key = line.lowercased()
+            if seen.insert(key).inserted {
+                unique.append(line)
+            }
+        }
+
+        let priorityKeywords = [
+            "critical", "severe", "moderate", "warning", "normal", "pass",
+            "leak", "crack", "rust", "wear", "damage", "broken", "replace", "repair",
+            "issue", "attention", "found", "noticed", "observed", "good", "okay"
+        ]
+
+        var priorityLines: [String] = []
+        var otherLines: [String] = []
+        for line in unique {
+            let lower = line.lowercased()
+            if priorityKeywords.contains(where: { lower.contains($0) }) {
+                priorityLines.append(line)
+            } else {
+                otherLines.append(line)
+            }
+        }
+
+        let selected = Array((priorityLines + otherLines).prefix(6))
+        return selected.enumerated().map { index, line in
+            let shortLine: String
+            var cleanLine = line
+            if cleanLine.hasPrefix("Inspector: ") {
+                cleanLine = String(cleanLine.dropFirst(11))
+            } else if cleanLine.hasPrefix("AI: ") {
+                cleanLine = String(cleanLine.dropFirst(4))
+            }
+            if cleanLine.count > 180 {
+                shortLine = String(cleanLine.prefix(177)) + "..."
+            } else {
+                shortLine = cleanLine
+            }
+            return "- \(shortLine)"
+        }.joined(separator: "\n")
+    }
+
     private func updateLiveUserSnippet(_ text: String) {
         let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleaned.isEmpty else { return }
@@ -3457,21 +3603,6 @@ private func appendFeedbackBullet(_ value: String) {
             }
         }
         return text
-    }
-
-    private func appendTranscribedFeedback(_ chunk: String) {
-        let normalized = chunk
-            .replacingOccurrences(of: "\n", with: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !normalized.isEmpty else { return }
-
-        if feedbackText.isEmpty {
-            feedbackText = normalized
-            return
-        }
-
-        let needsSpace = !feedbackText.hasSuffix(" ")
-        feedbackText += needsSpace ? " \(normalized)" : normalized
     }
 
     private func dismissKeyboard() {
