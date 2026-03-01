@@ -15,7 +15,7 @@ image = (
     .pip_install(
         "torch",
         "torchvision",
-        "transformers",
+        "transformers>=4.45",
         "accelerate",
         "qwen-vl-utils",
         "pillow",
@@ -244,22 +244,49 @@ def strip_to_json(text: str) -> str:
     """
     Extract the first {...} block from model output.
     Handles markdown fences (```json ... ```) and leading/trailing prose.
+    Validates result is parseable JSON; fixes common trailing-comma errors.
     """
     # Strip markdown fences
-    text = re.sub(r"```(?:json)?", "", text).strip()
+    text = re.sub(r"```(?:json|JSON)?\s*", "", text).replace("```", "").strip()
     # Find first { and last }
     start = text.find("{")
     end = text.rfind("}")
     if start != -1 and end != -1 and end > start:
-        return text[start : end + 1]
+        candidate = text[start : end + 1]
+        try:
+            json.loads(candidate)
+            return candidate
+        except json.JSONDecodeError:
+            # Fix trailing commas before ] or }
+            fixed = re.sub(r",\s*([}\]])", r"\1", candidate)
+            try:
+                json.loads(fixed)
+                return fixed
+            except json.JSONDecodeError:
+                return candidate  # return raw, let caller handle
     return text
+
+
+def _resize_for_inspection(pil_image, max_dim: int = 1536):
+    """Resize image to max_dim on longest side. Keeps aspect ratio."""
+    from PIL import Image as _Image
+    w, h = pil_image.size
+    if max(w, h) > max_dim:
+        scale = max_dim / max(w, h)
+        pil_image = pil_image.resize(
+            (int(w * scale), int(h * scale)), _Image.LANCZOS
+        )
+    return pil_image
 
 
 @app.cls(
     gpu="A10G",
     image=image,
     volumes={str(MODEL_VOL_PATH): volume},
-    timeout=180,  # raised: large subsection prompts take longer to process
+    timeout=180,
+    keep_warm=1,                  # always 1 warm container → no cold starts
+    container_idle_timeout=300,   # keep container alive 5 min after last request
+    allow_concurrent_inputs=4,    # handle 4 concurrent requests per container
 )
 class Inspector:
     """Runs inspection only when router has already selected the subsection prompt."""
@@ -267,7 +294,7 @@ class Inspector:
     @modal.enter()
     def load_model(self):
         os.environ["HF_HOME"] = str(MODEL_VOL_PATH)
-        volume.commit()
+        volume.reload()  # reload (read-only) — faster than commit
 
         import torch
         from transformers import AutoProcessor, Qwen2VLForConditionalGeneration
@@ -275,12 +302,14 @@ class Inspector:
         self.model = Qwen2VLForConditionalGeneration.from_pretrained(
             "Qwen/Qwen2-VL-7B-Instruct",
             device_map="auto",
-            torch_dtype=torch.float16,
+            torch_dtype=torch.bfloat16,   # bfloat16 — better numeric stability than fp16
+            attn_implementation="sdpa",   # PyTorch SDPA — fused attention, faster
         )
+        self.model.eval()  # disable dropout — pure inference
         self.processor = AutoProcessor.from_pretrained(
             "Qwen/Qwen2-VL-7B-Instruct",
             min_pixels=256 * 256,
-            max_pixels=1024 * 1024,
+            max_pixels=1280 * 1280,  # was 1024*1024 — slightly more detail
         )
 
     @modal.method()
@@ -289,12 +318,13 @@ class Inspector:
         image_b64: str,
         subsection_prompt: str,
         component_hint: str = "",
+        voice_text: str = "",
     ) -> str:
         """
         Full inspection. Returns JSON string.
-        system_prompt is now in the SYSTEM role, not injected into user turn.
-        max_new_tokens raised to 1024 so full JSON is never truncated.
-        Example is component-specific to avoid biasing toward wrong findings.
+        - voice_text: inspector's verbal observation injected as context
+        - Uses inference_mode for speed
+        - Image resized to 1536px max for faster vision encoding
         """
         import io
         import torch
@@ -302,9 +332,10 @@ class Inspector:
 
         image_bytes = base64.b64decode(image_b64)
         pil_image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        pil_image = _resize_for_inspection(pil_image, max_dim=1536)
 
         with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
-            pil_image.save(f, format="JPEG")
+            pil_image.save(f, format="JPEG", quality=90)
             image_path = f.name
 
         # Pick component-specific example to avoid Tires/Rims bias
@@ -313,6 +344,22 @@ class Inspector:
         system_prompt = SYSTEM_PROMPT_TEMPLATE.format(
             component=component_key or "heavy equipment",
             example=example,
+        )
+
+        # Build user message — inject voice context if available
+        user_text_parts = [f"SUBSECTION KNOWLEDGE:\n{subsection_prompt}"]
+        if voice_text and voice_text.strip():
+            user_text_parts.append(
+                f"\nINSPECTOR'S OBSERVATION (verbal): \"{voice_text.strip()}\"\n"
+                "Use this as a hint for what to look for, but verify everything visually."
+            )
+        user_text_parts.append(
+            "\nPerform a THOROUGH inspection of this image. "
+            "Examine EVERY visible sub-component one by one. "
+            "For each sub-component, determine if there is damage, wear, corrosion, or anything missing. "
+            "Report EACH distinct issue as a separate anomaly entry. "
+            "Do NOT stop after the first finding — keep scanning the entire image. "
+            "Return JSON only."
         )
 
         try:
@@ -325,23 +372,11 @@ class Inspector:
                     "role": "user",
                     "content": [
                         {"type": "image", "path": image_path},
-                        {
-                            "type": "text",
-                            "text": (
-                                f"SUBSECTION KNOWLEDGE:\n{subsection_prompt}\n\n"
-                                "Perform a THOROUGH inspection of this image. "
-                                "Examine EVERY visible sub-component one by one. "
-                                "For each sub-component, determine if there is damage, wear, corrosion, or anything missing. "
-                                "Report EACH distinct issue as a separate anomaly entry. "
-                                "Do NOT stop after the first finding — keep scanning the entire image. "
-                                "Return JSON only."
-                            ),
-                        },
+                        {"type": "text", "text": "\n".join(user_text_parts)},
                     ],
                 },
             ]
 
-            # Qwen2-VL pattern: first build text with apply_chat_template, then tensorize
             prompt_text = self.processor.apply_chat_template(
                 conversation,
                 add_generation_prompt=True,
@@ -354,13 +389,13 @@ class Inspector:
                 return_tensors="pt",
             ).to(self.model.device)
 
-            with torch.no_grad():
+            with torch.inference_mode():  # faster than no_grad
                 output = self.model.generate(
                     **inputs,
                     max_new_tokens=2048,
                     do_sample=False,
                     temperature=None,
-                    repetition_penalty=1.05,
+                    repetition_penalty=1.1,  # slightly stronger to reduce repeats
                 )
 
             input_len = inputs["input_ids"].shape[1]
@@ -371,7 +406,6 @@ class Inspector:
                 clean_up_tokenization_spaces=True,
             )
 
-            # FIX 6: extract clean JSON even if model wraps in prose/fences
             return strip_to_json(decoded.strip())
 
         finally:
@@ -397,9 +431,10 @@ class Inspector:
 
         image_bytes = base64.b64decode(image_b64)
         pil_image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        pil_image = _resize_for_inspection(pil_image, max_dim=768)  # small for fast classify
 
         with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
-            pil_image.save(f, format="JPEG")
+            pil_image.save(f, format="JPEG", quality=85)
             image_path = f.name
 
         try:
@@ -443,10 +478,10 @@ One string only. Nothing else."""
                 return_tensors="pt",
             ).to(self.model.device)
 
-            with torch.no_grad():
+            with torch.inference_mode():
                 output = self.model.generate(
                     **inputs,
-                    max_new_tokens=32,     # FIX 4: was 8, "Steps/Handrails" = 15 chars
+                    max_new_tokens=32,
                     do_sample=False,
                     temperature=None,
                 )

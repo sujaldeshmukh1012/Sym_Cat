@@ -40,6 +40,7 @@ from api.routers.orders import router as orders_router
 from api.routers.log_inspection import router as log_inspection_router
 from api.routers.reports import router as reports_router
 from api.routers.fleet_health import router as fleet_health_router
+from api.routers.analytics import router as analytics_router
 
 app.include_router(machines_router)
 app.include_router(inspections_router)
@@ -48,6 +49,7 @@ app.include_router(orders_router)
 app.include_router(log_inspection_router)
 app.include_router(reports_router)
 app.include_router(fleet_health_router)
+app.include_router(analytics_router)
 
 
 @app.get("/health")
@@ -56,4 +58,4 @@ async def health():
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run("api.main:app", host="0.0.0.0", port=8000, reload=True)

@@ -8,14 +8,17 @@ import aiohttp
 import pyaudio
 from google import genai
 from google.genai import types
+from dotenv import load_dotenv
+
+load_dotenv() # Load from .env file
 
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
-GEMINI_API_KEY  = ""
+GEMINI_API_KEY  = os.environ.get("GEMINI_API_KEY")
 INSPEX_BASE_URL = "https://manav-sharma-yeet--inspex-core-fastapi-app-dev.modal.run"
-API_BASE_URL    = "https://karan-flowerless-glynda.ngrok-free.dev"   # ngrok → localhost:8000
-TEST_IMAGE_PATH = "/Users/manav/Desktop/dev/projects/Sym_Cat/cat_core/data/test/BrokenRimBolt1.jpg"
+API_BASE_URL    = "http://localhost:8000"   # local FastAPI server
+TEST_IMAGE_PATH = "/Users/manav/Desktop/dev/projects/Sym_Cat/symbiote_core/data/test/BrokenRimBolt2.jpg"
 
 FORMAT            = pyaudio.paInt16
 CHANNELS          = 1
@@ -25,7 +28,27 @@ CHUNK_SIZE        = 1024
 
 MODEL = "gemini-2.5-flash-native-audio-preview-12-2025"
 
-client = genai.Client(api_key=GEMINI_API_KEY)
+SYSTEM_INSTRUCTION = """
+You are a highly skilled CAT Equipment Maintenance AI Assistant. 
+Your goal is to help service technicians perform inspections and analyze equipment health.
+
+1. **Inspection and Reporting**:
+- After `run_inspection`, read the anomalies to the user (e.g. 'I found 2 issues: high rust on rim bolts...').
+- Ask if they want to report these findings.
+- If they want to change something, use `edit_findings`.
+- Once confirmed, call `report_anomalies`.
+
+2. **Predictive Health**:
+- When the user asks about fleet health or component failure, use `predict_fleet_health` or `predict_component_health`.
+- Explain the data trends and provide a clear recommendation (e.g. 'The hydraulic pump shows a 85% probability of failure within 100 hours. I recommend immediate replacement.').
+
+3. **Inventory & Parts**:
+- Finally, ask if they want to check inventory or order parts using `order_parts`.
+
+Keep your verbal responses concise and professional. Use engineering terminology (e.g. 'pitting', 'grouser wear', 'hydraulic seepage').
+"""
+
+client = genai.Client(api_key=GEMINI_API_KEY, http_options={'api_version': 'v1alpha'})
 pya    = pyaudio.PyAudio()
 
 # ---------------------------------------------------------------------------
@@ -41,14 +64,14 @@ TOOLS = [
                 "Call this when the user describes damage or asks to inspect something."
             ),
             parameters=types.Schema(
-                type=types.Type.OBJECT,
+                type="OBJECT",
                 properties={
                     "voice_text": types.Schema(
-                        type=types.Type.STRING,
+                        type="STRING",
                         description="What the inspector said about the damage"
                     ),
                     "equipment_id": types.Schema(
-                        type=types.Type.STRING,
+                        type="STRING",
                         description="Equipment ID e.g. CAT-320-002"
                     ),
                 },
@@ -63,10 +86,10 @@ TOOLS = [
                 "Call this AFTER run_inspection when the inspector confirms they want to report the findings."
             ),
             parameters=types.Schema(
-                type=types.Type.OBJECT,
+                type="OBJECT",
                 properties={
                     "confirmed": types.Schema(
-                        type=types.Type.BOOLEAN,
+                        type="BOOLEAN",
                         description="True if the inspector confirmed reporting"
                     ),
                 },
@@ -81,26 +104,26 @@ TOOLS = [
                 "change severity, or remove a finding. Call BEFORE report_anomalies."
             ),
             parameters=types.Schema(
-                type=types.Type.OBJECT,
+                type="OBJECT",
                 properties={
                     "action": types.Schema(
-                        type=types.Type.STRING,
+                        type="STRING",
                         description="'update' to change a finding, 'remove' to delete it"
                     ),
                     "finding_number": types.Schema(
-                        type=types.Type.INTEGER,
+                        type="INTEGER",
                         description="Which finding to edit (1, 2, 3, etc.)"
                     ),
                     "new_issue": types.Schema(
-                        type=types.Type.STRING,
+                        type="STRING",
                         description="New issue text (for update action)"
                     ),
                     "new_severity": types.Schema(
-                        type=types.Type.STRING,
+                        type="STRING",
                         description="New severity: fail, monitor, normal, or pass"
                     ),
                     "new_description": types.Schema(
-                        type=types.Type.STRING,
+                        type="STRING",
                         description="New description text (for update action)"
                     ),
                 },
@@ -109,20 +132,42 @@ TOOLS = [
         ),
 
         types.FunctionDeclaration(
-            name="order_parts",
+            name="predict_fleet_health",
             description=(
-                "Check inventory and order replacement parts for the inspection. "
-                "Call this AFTER report_anomalies when the inspector confirms they want to order parts."
+                "Analyze the health trend of a fleet. Returns overall trend (improving/degrading), "
+                "health score, and top recurring issues. Use when asked 'how is the fleet doing?'."
             ),
             parameters=types.Schema(
-                type=types.Type.OBJECT,
+                type="OBJECT",
                 properties={
-                    "confirmed": types.Schema(
-                        type=types.Type.BOOLEAN,
-                        description="True if the inspector confirmed ordering parts"
+                    "equipment_id": types.Schema(
+                        type="STRING",
+                        description="Equipment ID belonging to the fleet e.g. CAT-320-002"
                     ),
                 },
-                required=["confirmed"],
+                required=["equipment_id"],
+            ),
+        ),
+
+        types.FunctionDeclaration(
+            name="predict_component_health",
+            description=(
+                "Predict when a specific component will fail based on historical trends. "
+                "Returns days to critical failure. Use when asked 'when will this part break?'."
+            ),
+            parameters=types.Schema(
+                type="OBJECT",
+                properties={
+                    "equipment_id": types.Schema(
+                        type="STRING",
+                        description="Equipment ID e.g. CAT-320-002"
+                    ),
+                    "component": types.Schema(
+                        type="STRING",
+                        description="Component name e.g. Engine, Hydraulics, Tires"
+                    ),
+                },
+                required=["equipment_id", "component"],
             ),
         ),
 
@@ -131,41 +176,9 @@ TOOLS = [
 
 LIVE_CONFIG = types.LiveConnectConfig(
     response_modalities=["AUDIO"],
-    speech_config=types.SpeechConfig(
-        voice_config=types.VoiceConfig(
-            prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Charon")
-        )
+    system_instruction=types.Content(
+        parts=[types.Part(text=SYSTEM_INSTRUCTION)]
     ),
-    system_instruction=types.Content(parts=[types.Part(text="""
-You are an AI inspection assistant for CAT heavy equipment.
-
-FLOW:
-1. When the user describes damage or mentions a component, call run_inspection immediately.
-   The inspection takes 30-60 seconds (AI vision on GPU). Tell the user
-   "Running the inspection now, this will take about 30 seconds" and WAIT
-   patiently for the tool response. Do NOT call the tool again.
-
-2. After getting inspection results, read each finding with its NUMBER, severity, and issue.
-   Example: "Finding 1: FAIL — severe rim corrosion. Finding 2: MONITOR — missing lug nut."
-   Then ask: "Would you like to correct or remove any findings before I save them?"
-
-3. If the inspector wants to change something (e.g. "finding 1 is not rust, it's a scratch",
-   "change finding 2 to fail", "remove finding 3"), call edit_findings for each change.
-   After editing, read back the updated findings and ask again if they look correct.
-
-4. When the inspector confirms the findings are correct, ask:
-   "Should I save these findings to the task database?"
-   If yes, call report_anomalies with confirmed=true.
-   If no, call report_anomalies with confirmed=false.
-
-5. After reporting, tell the user what parts are needed and ask:
-   "Should I check inventory and order replacement parts?"
-   If yes, call order_parts with confirmed=true.
-   If no, call order_parts with confirmed=false.
-
-Keep responses short and clear.
-Current equipment: CAT-320-002, task_id=1, inspection_id=5.
-""")]),
     tools=TOOLS,
 )
 
@@ -206,6 +219,19 @@ async def execute_tool(name: str, args: dict) -> dict:
 
     elif name == "edit_findings":
         return edit_findings_in_memory(args)
+
+    elif name == "predict_fleet_health":
+        eq_id = args.get("equipment_id")
+        if not isinstance(eq_id, str):
+            return {"error": "equipment_id must be a string"}
+        return await call_fleet_health(eq_id)
+
+    elif name == "predict_component_health":
+        eq_id = args.get("equipment_id")
+        comp = args.get("component")
+        if not isinstance(eq_id, str) or not isinstance(comp, str):
+            return {"error": "equipment_id and component must be strings"}
+        return await call_predict_component(eq_id, comp)
 
     return {"error": f"Unknown tool: {name}"}
 
@@ -253,20 +279,26 @@ async def call_inspect(args: dict) -> dict:
     form.add_field("equipment_id",   args.get("equipment_id", "CAT-320-002"))
     form.add_field("equipment_model","CAT 320 Excavator")
 
+
     try:
         async with aiohttp.ClientSession() as http:
             async with http.post(
                 f"{INSPEX_BASE_URL}/inspect",
                 data=form,
-                timeout=aiohttp.ClientTimeout(total=180)   # Modal GPU cold-start can be slow
+                timeout=aiohttp.ClientTimeout(total=180)
             ) as resp:
-                result = await resp.json()
+                try:
+                    result = await resp.json()
+                except Exception as json_err:
+                    raw_text = await resp.text()
+                    print(f"[DEBUG] Raw response text: {raw_text}")
+                    print(f"[ERROR] JSON decode failed: {json_err}")
+                    return {"error": str(json_err), "raw_response": raw_text}
 
-        print(f"[INSPECT] Response status: {result.get('overall_status')}")
+        print(f"[INSPECT] Result: {result.get('overall_status')}")
         print(f"[INSPECT] Anomalies: {len(result.get('anomalies', []))}")
         print(f"[INSPECT] Parts: {len(result.get('parts', []))}")
 
-        # Return trimmed version for Gemini, but stash the full result
         trimmed = _trim_for_speech(result)
         trimmed["_full"] = result
         return trimmed
@@ -274,6 +306,55 @@ async def call_inspect(args: dict) -> dict:
     except Exception as e:
         print(f"[ERROR] /inspect call failed: {e}")
         return {"error": str(e)}
+
+
+async def call_fleet_health(equipment_id: str) -> dict:
+    """Fetch fleet health trend from the local API."""
+    if not equipment_id:
+        return {"error": "Missing equipment_id"}
+
+    # Resolve equipment_id to fleet_id via database
+    import sys
+    from pathlib import Path
+    # Ensure project root is in path for relative imports if needed
+    root = Path(__file__).parent.parent
+    if str(root) not in sys.path:
+        sys.path.append(str(root))
+        
+    try:
+        from api.routers import supabase
+    except ImportError:
+        return {"error": "Could not import supabase from api.routers"}
+
+    try:
+        resp = supabase.table("fleet").select("id").eq("serial_number", equipment_id).execute()
+        if not resp.data:
+            return {"error": f"Fleet for {equipment_id} not found"}
+        fleet_id = resp.data[0]["id"]
+    except Exception as e:
+        return {"error": f"Failed to resolve fleet: {e}"}
+
+    # Call the fleet-health endpoint
+    url = API_BASE_URL
+    async with aiohttp.ClientSession() as session:
+        async with session.get(f"{url}/fleet-health/{fleet_id}") as resp:
+            if resp.status != 200:
+                return {"error": f"Fleet health API error: {resp.status}"}
+            return await resp.json()
+
+
+async def call_predict_component(equipment_id: str, component: str) -> dict:
+    """Fetch predictive failure scores from the local API."""
+    if not equipment_id or not component:
+        return {"error": "Missing equipment_id or component"}
+
+    url = API_BASE_URL
+    params = {"equipment_id": equipment_id, "component": component}
+    async with aiohttp.ClientSession() as session:
+        async with session.get(f"{url}/analytics/predict_failure", params=params) as resp:
+            if resp.status != 200:
+                return {"error": f"Prediction API error: {resp.status}"}
+            return await resp.json()
 
 
 async def call_report_anomalies() -> dict:
@@ -286,10 +367,10 @@ async def call_report_anomalies() -> dict:
         "inspection_id": INSPECTION_ID,
         "overall_status": last_inspection_result.get("overall_status", "monitor"),
         "operational_impact": last_inspection_result.get("operational_impact", ""),
-        "anomalies": last_inspection_result.get("anomalies") or [],
+        "anomolies": last_inspection_result.get("anomalies") or [],
     }
 
-    print(f"[REPORT] Sending {len(payload['anomalies'])} anomalies to task {TASK_ID}")
+    print(f"[REPORT] Sending {len(payload['anomolies'])} anomolies to task {TASK_ID}")
 
     try:
         async with aiohttp.ClientSession() as http:
@@ -425,16 +506,22 @@ def _refresh_parts():
 def _trim_for_speech(result: dict) -> dict:
     """
     Cut down the full inspection JSON to a minimal dict that Gemini can speak.
-    Gemini Live has strict payload limits — keep this VERY short.
+    Gemini Live has strict payload limits - keep this VERY short.
     Numbers each finding so the inspector can reference them for editing.
     """
+    if not isinstance(result, dict):
+        return {"error": "Invalid result format from inspector"}
+
     status = result.get("overall_status", "unknown")
     component = result.get("component_identified", "unknown")
     impact = (result.get("operational_impact") or "")[:120]
 
     # Numbered findings so inspector can say "change finding 2"
     findings = []
-    for i, a in enumerate((result.get("anomalies") or [])[:5], 1):
+    # backend uses 'anomalies' but returns them as 'anomolies' sometimes in raw response? 
+    # Actually analyzer.py uses 'anomalies' (with 'a').
+    raw_anoms = result.get("anomalies") or result.get("anomolies") or []
+    for i, a in enumerate(raw_anoms[:5], 1):
         sev = a.get("severity", "?")
         issue = a.get("issue", "unknown issue")
         findings.append(f"#{i} {sev}: {issue}")
@@ -468,7 +555,7 @@ _tool_idle.set()  # idle initially
 
 
 async def listen_mic():
-    """Capture mic audio → input queue."""
+    """Capture mic audio -> input queue."""
     global audio_stream_in
     mic_info = pya.get_default_input_device_info()
     audio_stream_in = await asyncio.to_thread(
@@ -487,7 +574,7 @@ async def listen_mic():
 
 
 async def send_mic_to_gemini(session):
-    """Input queue → Gemini.  Pauses while speaker is playing or tool call is in flight."""
+    """Input queue -> Gemini.  Pauses while speaker is playing or tool call is in flight."""
     while True:
         chunk = await audio_input_queue.get()
         if is_playing or not _tool_idle.is_set():
@@ -541,14 +628,14 @@ async def _handle_tool_call(session, fn_call):
                 ]
             )
         except Exception:
-            print("[ERROR] Could not send error tool response — session may be closed")
+            print("[ERROR] Could not send error tool response - session may be closed")
     finally:
         _tool_idle.set()   # resume mic regardless of success/failure
         print("[TOOL] Mic resumed")
 
 
 async def receive_from_gemini(session):
-    """Receive Gemini responses — audio and tool calls."""
+    """Receive Gemini responses - audio and tool calls."""
     global _gemini_session
     _gemini_session = session
 
@@ -557,7 +644,7 @@ async def receive_from_gemini(session):
             turn = session.receive()
             async for response in turn:
 
-                # Audio response → output queue
+                # Audio response -> output queue
                 if response.server_content and response.server_content.model_turn:
                     for part in response.server_content.model_turn.parts:
                         if part.inline_data and isinstance(part.inline_data.data, bytes):
@@ -566,7 +653,7 @@ async def receive_from_gemini(session):
                         if hasattr(part, "text") and part.text:
                             print(f"\n[GEMINI] {part.text}")
 
-                # Tool call → fire as background task so we don't block the receive loop
+                # Tool call -> fire as background task so we don't block the receive loop
                 if response.tool_call:
                     for fn_call in response.tool_call.function_calls:
                         asyncio.create_task(_handle_tool_call(session, fn_call))
@@ -583,7 +670,7 @@ async def receive_from_gemini(session):
 
 
 async def play_speaker():
-    """Output queue → speaker.  Sets is_playing flag to mute mic during playback."""
+    """Output queue -> speaker.  Sets is_playing flag to mute mic during playback."""
     global is_playing
     stream = await asyncio.to_thread(
         pya.open,

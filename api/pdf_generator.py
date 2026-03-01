@@ -6,7 +6,11 @@ from typing import Any
 from dotenv import load_dotenv
 from jinja2 import Environment, FileSystemLoader
 from supabase import Client, create_client
-from xhtml2pdf import pisa
+
+try:
+    from xhtml2pdf import pisa
+except ImportError:
+    pisa = None  # Python 3.14 compatibility — pycairo not yet available
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(dotenv_path=os.path.join(BASE_DIR, ".env"))

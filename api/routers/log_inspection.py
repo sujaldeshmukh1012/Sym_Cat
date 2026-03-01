@@ -28,12 +28,12 @@ class ReportAnomaliesRequest(BaseModel):
     inspection_id: Optional[int] = None
     overall_status: str = "monitor"
     operational_impact: str = ""
-    anomalies: list[AnomalyItem] = []
+    anomolies: list[AnomalyItem] = []
 
 
 class ReportAnomaliesResponse(BaseModel):
     task_updated: bool = False
-    anomalies_count: int = 0
+    anomolies_count: int = 0
     error: str = ""
 
 
@@ -45,7 +45,7 @@ class PartItem(BaseModel):
 
 
 class OrderPartsRequest(BaseModel):
-    inspection_id: Optional[int] = None
+    inspection_id: Optional[str] = None
     parts: list[PartItem] = []
 
 
@@ -144,20 +144,20 @@ async def report_anomalies(payload: ReportAnomaliesRequest):
     Called by Gemini when the inspector confirms reporting findings.
     """
     response = ReportAnomaliesResponse()
-    anomalies_dicts = [a.model_dump() for a in payload.anomalies]
+    anomolies_dicts = [a.model_dump() for a in payload.anomolies]
 
-    _log.info("report-anomalies: task_id=%s, %d anomalies, status=%s",
-              payload.task_id, len(anomalies_dicts), payload.overall_status)
+    _log.info("report-anomalies: task_id=%s, %d anomolies, status=%s",
+              payload.task_id, len(anomolies_dicts), payload.overall_status)
 
     try:
         # Each anomaly is stored as a JSON string element in the text[] array
-        anomalies_json_strings = [json.dumps(a) for a in anomalies_dicts]
+        anomolies_json_strings = [json.dumps(a) for a in anomolies_dicts]
         task_update = {
-            "anomalies": anomalies_json_strings,   # text[] column (schema typo)
+            "anomolies": anomolies_json_strings,   # text[] column (schema typo)
             "state": _severity_to_state(payload.overall_status),
             "description": payload.operational_impact,
         }
-        _log.info("task_update payload: %d anomalies, state=%s", len(anomalies_json_strings), task_update["state"])
+        _log.info("task_update payload: %d anomolies, state=%s", len(anomolies_json_strings), task_update["state"])
 
         resp = (
             supabase.table("task")
@@ -167,8 +167,8 @@ async def report_anomalies(payload: ReportAnomaliesRequest):
         )
         if resp.data:
             response.task_updated = True
-            response.anomalies_count = len(anomalies_dicts)
-            _log.info("Task %s updated with %d anomalies", payload.task_id, len(anomalies_dicts))
+            response.anomolies_count = len(anomolies_dicts)
+            _log.info("Task %s updated with %d anomolies", payload.task_id, len(anomolies_dicts))
         else:
             response.error = f"Task {payload.task_id} not found"
             _log.warning(response.error)
@@ -215,14 +215,22 @@ async def order_parts(payload: OrderPartsRequest):
             part_id = _fuzzy_find_part_id(p.part_name)
 
         if part_id is not None:
+            # Get part_number for the cart
+            part_number = inv_rows[0].get("part_number")
+            if not part_number:
+                # Fallback: lookup part_number from part_id
+                part_resp = supabase.table("parts").select("part_name").eq("id", part_id).execute()
+                part_number = part_resp.data[0]["part_name"] if part_resp.data else p.part_name
+
             cart_rows.append({
                 "inspection_id": payload.inspection_id,
-                "parts": part_id,
+                "part_number": part_number,
+                "part_name": p.part_name,
                 "quantity": p.quantity,
-                "urgency": p.urgency == "fail",
+                "urgency": "Critical" if p.urgency == "fail" else "Moderate",
                 "status": "pending",
             })
-            response.details.append(f"'{p.part_name}' -> part_id={part_id}, stock={total_stock}, ordering {p.quantity}")
+            response.details.append(f"'{p.part_name}' -> part_number={part_number}, stock={total_stock}, ordering {p.quantity}")
         else:
             msg = f"No matching part in parts table for '{p.part_name}'"
             _log.warning(msg)
