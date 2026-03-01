@@ -3,8 +3,8 @@ import SwiftUI
 
 // MARK: - LiveInspectionView
 
-/// Full-screen view: live camera preview + Gemini voice assistant
-/// The inspector talks to Gemini; when Gemini calls `take_photo`,
+/// Full-screen view: live camera preview + Cat AI voice assistant
+/// The inspector talks to Cat; when Cat calls `take_photo`,
 /// the camera captures a frame and sends it to Modal /inspect.
 struct LiveInspectionView: View {
     let onClose: () -> Void
@@ -12,6 +12,8 @@ struct LiveInspectionView: View {
     @StateObject private var service = LiveInspectionService()
     @StateObject private var cameraService = LiveCameraService()
     @State private var showTranscript = false
+    @State private var showErrorCodes = false
+    @State private var showAnnotatedImage = false
     
     var body: some View {
         ZStack {
@@ -33,11 +35,23 @@ struct LiveInspectionView: View {
             VStack(spacing: 0) {
                 topBar
                 Spacer()
+                feedbackBanner
+                errorCodesBadge
                 statusBanner
                 transcriptOverlay
                 bottomControls
             }
             .padding(.bottom, 16)
+            
+            // Annotated image overlay (full-screen, tap to dismiss)
+            if showAnnotatedImage, let img = service.annotatedImage {
+                annotatedImageOverlay(img)
+            }
+            
+            // Error codes sheet overlay
+            if showErrorCodes && !service.matchedErrorCodes.isEmpty {
+                errorCodesSheet
+            }
         }
         .onAppear {
             cameraService.start()
@@ -46,6 +60,9 @@ struct LiveInspectionView: View {
         .onDisappear {
             service.disconnect()
             cameraService.stop()
+        }
+        .onChange(of: service.annotatedImage) { newImage in
+            if newImage != nil { showAnnotatedImage = true }
         }
         .statusBarHidden()
     }
@@ -236,7 +253,7 @@ struct LiveInspectionView: View {
                 .shadow(color: mainButtonColor.opacity(0.4), radius: 12)
             }
             
-            // Manual photo capture (optional)
+            // Manual photo capture
             Button {
                 Task { await manualCapture() }
             } label: {
@@ -252,6 +269,221 @@ struct LiveInspectionView: View {
             .opacity(service.state == .connected ? 1 : 0.4)
         }
         .padding(.horizontal, 32)
+    }
+    
+    // MARK: - Feedback banner
+    
+    private var feedbackBanner: some View {
+        Group {
+            if !service.feedbackText.isEmpty {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.black)
+                        .font(.subheadline)
+                    Text(service.feedbackText)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.black)
+                        .lineLimit(3)
+                        .multilineTextAlignment(.leading)
+                    Spacer()
+                    Button {
+                        withAnimation { service.feedbackText = "" }
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.black.opacity(0.5))
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(Color(red: 1.0, green: 0.804, blue: 0.067), in: RoundedRectangle(cornerRadius: 12))
+                .padding(.horizontal, 16)
+                .padding(.bottom, 6)
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .animation(.spring(response: 0.4), value: service.feedbackText.isEmpty)
+    }
+    
+    // MARK: - Error codes badge (tap to expand)
+    
+    private var errorCodesBadge: some View {
+        Group {
+            if !service.matchedErrorCodes.isEmpty {
+                Button {
+                    withAnimation(.spring(response: 0.3)) {
+                        showErrorCodes.toggle()
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "exclamationmark.octagon.fill")
+                            .foregroundStyle(.red)
+                        Text("\(service.matchedErrorCodes.count) Error Code\(service.matchedErrorCodes.count == 1 ? "" : "s") Matched")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.white)
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.caption2)
+                            .foregroundStyle(.white.opacity(0.6))
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
+                }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 6)
+            }
+        }
+    }
+    
+    // MARK: - Error codes sheet overlay
+    
+    private var errorCodesSheet: some View {
+        VStack(spacing: 0) {
+            Spacer()
+            VStack(spacing: 0) {
+                // Handle bar
+                RoundedRectangle(cornerRadius: 3)
+                    .fill(.white.opacity(0.4))
+                    .frame(width: 40, height: 5)
+                    .padding(.top, 10)
+                    .padding(.bottom, 8)
+                
+                // Header
+                HStack {
+                    Text("Matched Error Codes")
+                        .font(.headline.weight(.bold))
+                        .foregroundStyle(.white)
+                    Spacer()
+                    Button {
+                        withAnimation { showErrorCodes = false }
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.title3)
+                            .foregroundStyle(.white.opacity(0.6))
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 12)
+                
+                // Error code rows
+                ScrollView {
+                    LazyVStack(spacing: 8) {
+                        ForEach(Array(service.matchedErrorCodes.enumerated()), id: \.offset) { _, code in
+                            errorCodeRow(code)
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 20)
+                }
+                .frame(maxHeight: 320)
+            }
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 20))
+            .padding(.horizontal, 8)
+            .padding(.bottom, 8)
+        }
+        .background(Color.black.opacity(0.3).ignoresSafeArea().onTapGesture {
+            withAnimation { showErrorCodes = false }
+        })
+        .transition(.move(edge: .bottom).combined(with: .opacity))
+    }
+    
+    private func errorCodeRow(_ code: [String: String]) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            // Severity indicator
+            Circle()
+                .fill(severityColor(code["severity"] ?? "medium"))
+                .frame(width: 10, height: 10)
+                .padding(.top, 5)
+            
+            VStack(alignment: .leading, spacing: 3) {
+                HStack {
+                    Text(code["code"] ?? "Unknown")
+                        .font(.subheadline.weight(.bold).monospaced())
+                        .foregroundStyle(.white)
+                    if let component = code["component"] {
+                        Text("- \(component)")
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.7))
+                    }
+                }
+                Text(code["description"] ?? "")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.8))
+                    .lineLimit(2)
+            }
+            Spacer()
+        }
+        .padding(10)
+        .background(.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
+    }
+    
+    private func severityColor(_ severity: String) -> Color {
+        switch severity.lowercased() {
+        case "critical": return .red
+        case "high": return .orange
+        case "medium": return .yellow
+        case "low": return .green
+        default: return .gray
+        }
+    }
+    
+    // MARK: - Annotated image overlay
+    
+    private func annotatedImageOverlay(_ image: UIImage) -> some View {
+        ZStack {
+            Color.black.opacity(0.85).ignoresSafeArea()
+            
+            VStack(spacing: 16) {
+                // Header
+                HStack {
+                    Text("Analysis Results")
+                        .font(.headline.weight(.bold))
+                        .foregroundStyle(.white)
+                    Spacer()
+                    Button {
+                        withAnimation { showAnnotatedImage = false }
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.title2)
+                            .foregroundStyle(.white.opacity(0.7))
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 60)
+                
+                // Annotated image
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .padding(.horizontal, 16)
+                
+                // Instruction
+                Text("Bounding boxes highlight detected issues")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.5))
+                
+                Spacer()
+                
+                // Dismiss button
+                Button {
+                    withAnimation { showAnnotatedImage = false }
+                } label: {
+                    Text("Dismiss")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.black)
+                        .padding(.horizontal, 32)
+                        .padding(.vertical, 12)
+                        .background(Color(red: 1.0, green: 0.804, blue: 0.067), in: Capsule())
+                }
+                .padding(.bottom, 40)
+            }
+        }
+        .transition(.opacity)
+        .onTapGesture {
+            withAnimation { showAnnotatedImage = false }
+        }
     }
     
     private var mainButtonColor: Color {
@@ -273,7 +505,7 @@ struct LiveInspectionView: View {
     
     private func manualCapture() async {
         guard let data = try? await cameraService.capturePhotoData() else { return }
-        // Send as a text message to Gemini to trigger tool call
+        // Send as a text message to Cat AI to trigger tool call
         // In practice the inspector would just say "take a photo"
         print("[LiveView] Manual capture: \(data.count) bytes")
     }

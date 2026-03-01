@@ -4,10 +4,12 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "lint": "eslint .",
-    "preview": "vite preview"
+    "dev": "cd cat-command-center && npm run dev",
+    "build": "cd cat-command-center && npm run build",
+    "lint": "cd cat-command-center && npm run lint",
+    "preview": "cd cat-command-center && npm run preview",
+    "dev:legacy": "vite",
+    "build:legacy": "vite build"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.98.0",

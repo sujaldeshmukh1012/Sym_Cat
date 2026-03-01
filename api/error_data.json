@@ -1,0 +1,628 @@
+{
+  "errors": [
+    {
+      "error_code": "CID 1116",
+      "error_description": "Air-fuel ratio sensor circuit malfunction - sensor signal out of expected range, causing incorrect fuel mixture and potential black smoke or power loss",
+      "component": "air fuel system",
+      "severity": "medium",
+      "keywords": [
+        "air fuel",
+        "fuel mixture",
+        "exhaust",
+        "black smoke",
+        "fuel ratio",
+        "lambda sensor"
+      ]
+    },
+    {
+      "error_code": "CID 1114",
+      "error_description": "Air conditioning refrigerant pressure sensor circuit fault - unable to read AC system pressure, may cause compressor cycling or cab cooling failure",
+      "component": "ac system",
+      "severity": "medium",
+      "keywords": [
+        "ac",
+        "air conditioning",
+        "refrigerant",
+        "cooling",
+        "cab temperature",
+        "compressor"
+      ]
+    },
+    {
+      "error_code": "CID 1080",
+      "error_description": "Intake manifold temperature sensor circuit fault - incorrect air temperature readings affecting fuel injection timing and combustion efficiency",
+      "component": "sensors",
+      "severity": "medium",
+      "keywords": [
+        "intake",
+        "manifold",
+        "temperature sensor",
+        "air temperature",
+        "combustion"
+      ]
+    },
+    {
+      "error_code": "CID 0094",
+      "error_description": "Fuel supply pressure sensor circuit malfunction - fuel rail pressure reading abnormal, risk of engine stalling or reduced power under load",
+      "component": "fuel system",
+      "severity": "high",
+      "keywords": [
+        "fuel pressure",
+        "fuel rail",
+        "fuel supply",
+        "stalling",
+        "power loss",
+        "fuel pump"
+      ]
+    },
+    {
+      "error_code": "CID 0096",
+      "error_description": "Fuel level sensor circuit fault - fuel tank level reading inaccurate or intermittent, risk of unexpected fuel exhaustion in the field",
+      "component": "fuel sensors",
+      "severity": "medium",
+      "keywords": [
+        "fuel level",
+        "fuel gauge",
+        "fuel tank",
+        "fuel sensor"
+      ]
+    },
+    {
+      "error_code": "Code 0168",
+      "error_description": "Electrical system voltage out of range - battery charging voltage too high or too low, can damage ECM and electronic components",
+      "component": "electrical system",
+      "severity": "high",
+      "keywords": [
+        "voltage",
+        "battery",
+        "alternator",
+        "charging",
+        "electrical",
+        "ECM"
+      ]
+    },
+    {
+      "error_code": "CID 0100",
+      "error_description": "Engine oil pressure sensor circuit fault - oil pressure reading abnormal, risk of bearing damage or engine seizure if actual pressure is low",
+      "component": "engine",
+      "severity": "critical",
+      "keywords": [
+        "oil pressure",
+        "engine oil",
+        "lubrication",
+        "bearing",
+        "seizure",
+        "oil pump"
+      ]
+    },
+    {
+      "error_code": "CID 0110",
+      "error_description": "Engine coolant temperature sensor circuit fault - coolant temp reading inaccurate, risk of undetected overheating causing head gasket or cylinder damage",
+      "component": "cooling system",
+      "severity": "high",
+      "keywords": [
+        "coolant",
+        "temperature",
+        "overheating",
+        "radiator",
+        "thermostat",
+        "head gasket"
+      ]
+    },
+    {
+      "error_code": "CID 0190",
+      "error_description": "Engine speed/timing sensor circuit fault - unable to read crankshaft RPM, engine may not start or may stall unexpectedly",
+      "component": "engine",
+      "severity": "critical",
+      "keywords": [
+        "engine speed",
+        "RPM",
+        "crankshaft",
+        "timing",
+        "stall",
+        "no start"
+      ]
+    },
+    {
+      "error_code": "CID 0091",
+      "error_description": "Throttle position sensor circuit error - erratic throttle response or limp mode activation, reduced machine productivity",
+      "component": "engine",
+      "severity": "high",
+      "keywords": [
+        "throttle",
+        "accelerator",
+        "pedal",
+        "limp mode",
+        "engine speed control"
+      ]
+    },
+    {
+      "error_code": "CID 0262",
+      "error_description": "Transmission oil pressure sensor circuit fault - abnormal transmission hydraulic pressure reading, risk of gear slipping or harsh shifts",
+      "component": "transmission",
+      "severity": "high",
+      "keywords": [
+        "transmission",
+        "gear",
+        "shift",
+        "transmission oil",
+        "hydraulic pressure",
+        "slipping"
+      ]
+    },
+    {
+      "error_code": "CID 0263",
+      "error_description": "Transmission oil temperature sensor fault - unable to detect overheating in transmission fluid, risk of premature wear and seal failure",
+      "component": "transmission",
+      "severity": "medium",
+      "keywords": [
+        "transmission temperature",
+        "transmission fluid",
+        "overheating",
+        "seal",
+        "clutch"
+      ]
+    },
+    {
+      "error_code": "CID 1239",
+      "error_description": "Hydraulic pump pressure sensor circuit fault - abnormal main hydraulic pump pressure reading, may cause slow or jerky implement movement",
+      "component": "hydraulic system",
+      "severity": "high",
+      "keywords": [
+        "hydraulic pump",
+        "hydraulic pressure",
+        "implement",
+        "boom",
+        "bucket",
+        "cylinder"
+      ]
+    },
+    {
+      "error_code": "CID 1240",
+      "error_description": "Hydraulic oil temperature sensor fault - hydraulic fluid temperature reading abnormal, risk of oil breakdown and accelerated seal wear",
+      "component": "hydraulic system",
+      "severity": "medium",
+      "keywords": [
+        "hydraulic temperature",
+        "hydraulic fluid",
+        "oil temperature",
+        "seal wear",
+        "viscosity"
+      ]
+    },
+    {
+      "error_code": "CID 1241",
+      "error_description": "Hydraulic oil level sensor fault - unable to verify hydraulic fluid reservoir level, risk of pump cavitation and system damage",
+      "component": "hydraulic system",
+      "severity": "high",
+      "keywords": [
+        "hydraulic level",
+        "hydraulic fluid",
+        "reservoir",
+        "cavitation",
+        "pump damage"
+      ]
+    },
+    {
+      "error_code": "CID 0268",
+      "error_description": "Hydraulic pilot pressure sensor fault - pilot circuit pressure reading abnormal, may cause unresponsive joystick or implement controls",
+      "component": "hydraulic system",
+      "severity": "high",
+      "keywords": [
+        "pilot pressure",
+        "joystick",
+        "control valve",
+        "implement control",
+        "hydraulic pilot"
+      ]
+    },
+    {
+      "error_code": "CID 0774",
+      "error_description": "Swing motor pressure sensor fault - swing drive pressure abnormal, upper structure may swing slowly or erratically",
+      "component": "swing system",
+      "severity": "medium",
+      "keywords": [
+        "swing",
+        "rotation",
+        "turntable",
+        "swing motor",
+        "slew ring"
+      ]
+    },
+    {
+      "error_code": "CID 1442",
+      "error_description": "Track drive motor pressure sensor fault - travel motor pressure reading abnormal, machine may track slowly or pull to one side",
+      "component": "undercarriage",
+      "severity": "high",
+      "keywords": [
+        "track",
+        "travel motor",
+        "drive motor",
+        "undercarriage",
+        "tracking",
+        "pulling"
+      ]
+    },
+    {
+      "error_code": "CID 0041",
+      "error_description": "Turbocharger boost pressure sensor circuit fault - abnormal boost reading, engine may derate or produce excessive exhaust smoke",
+      "component": "engine",
+      "severity": "high",
+      "keywords": [
+        "turbo",
+        "turbocharger",
+        "boost",
+        "exhaust",
+        "derate",
+        "smoke",
+        "intake pressure"
+      ]
+    },
+    {
+      "error_code": "CID 0174",
+      "error_description": "Fuel temperature sensor circuit fault - diesel fuel temperature reading abnormal, affects fuel injection volume calculation",
+      "component": "fuel system",
+      "severity": "medium",
+      "keywords": [
+        "fuel temperature",
+        "diesel",
+        "injection",
+        "fuel heat"
+      ]
+    },
+    {
+      "error_code": "CID 0261",
+      "error_description": "Engine timing calibration fault - injector timing offset detected, engine runs rough with increased fuel consumption and emissions",
+      "component": "engine",
+      "severity": "high",
+      "keywords": [
+        "timing",
+        "injector",
+        "calibration",
+        "rough running",
+        "fuel consumption",
+        "emissions"
+      ]
+    },
+    {
+      "error_code": "CID 0342",
+      "error_description": "After-treatment DPF differential pressure sensor fault - cannot monitor soot load in diesel particulate filter, risk of forced regeneration failure",
+      "component": "exhaust system",
+      "severity": "medium",
+      "keywords": [
+        "DPF",
+        "particulate filter",
+        "regeneration",
+        "soot",
+        "exhaust",
+        "after-treatment"
+      ]
+    },
+    {
+      "error_code": "CID 0343",
+      "error_description": "After-treatment DEF quality sensor fault - diesel exhaust fluid quality reading abnormal, may trigger engine derate",
+      "component": "exhaust system",
+      "severity": "medium",
+      "keywords": [
+        "DEF",
+        "urea",
+        "AdBlue",
+        "SCR",
+        "NOx",
+        "after-treatment",
+        "derate"
+      ]
+    },
+    {
+      "error_code": "CID 0164",
+      "error_description": "Injection actuation pressure sensor fault - high-pressure oil circuit reading abnormal in HEUI systems, engine may not start or run rough",
+      "component": "fuel system",
+      "severity": "critical",
+      "keywords": [
+        "injection",
+        "HEUI",
+        "actuation pressure",
+        "high pressure oil",
+        "injector pump"
+      ]
+    },
+    {
+      "error_code": "CID 0274",
+      "error_description": "Atmospheric pressure sensor fault - barometric pressure reading abnormal, affects fuel and turbo boost compensation at altitude",
+      "component": "sensors",
+      "severity": "low",
+      "keywords": [
+        "atmospheric",
+        "barometric",
+        "altitude",
+        "pressure sensor",
+        "compensation"
+      ]
+    },
+    {
+      "error_code": "CID 0248",
+      "error_description": "CAT Data Link communication fault - ECM unable to communicate on the CAT proprietary data link, loss of machine monitoring and diagnostics",
+      "component": "electrical system",
+      "severity": "high",
+      "keywords": [
+        "data link",
+        "communication",
+        "CAN bus",
+        "ECM",
+        "diagnostics",
+        "monitoring"
+      ]
+    },
+    {
+      "error_code": "CID 0297",
+      "error_description": "CAN Data Link fault - J1939 CAN bus communication loss between ECMs, may affect coordinated machine functions",
+      "component": "electrical system",
+      "severity": "high",
+      "keywords": [
+        "CAN bus",
+        "J1939",
+        "communication",
+        "data link",
+        "network",
+        "ECM"
+      ]
+    },
+    {
+      "error_code": "CID 0472",
+      "error_description": "Brake oil pressure switch circuit fault - service brake pressure warning inoperative, critical safety risk if brakes are low",
+      "component": "brake system",
+      "severity": "critical",
+      "keywords": [
+        "brake",
+        "brake pressure",
+        "service brake",
+        "brake oil",
+        "stopping",
+        "safety"
+      ]
+    },
+    {
+      "error_code": "CID 0473",
+      "error_description": "Parking brake solenoid circuit fault - parking brake may not engage or release properly, risk of machine rollaway",
+      "component": "brake system",
+      "severity": "critical",
+      "keywords": [
+        "parking brake",
+        "solenoid",
+        "rollaway",
+        "brake engage",
+        "brake release"
+      ]
+    },
+    {
+      "error_code": "CID 0596",
+      "error_description": "Steering pressure sensor fault - steering circuit pressure reading abnormal, may cause heavy or unresponsive steering",
+      "component": "steering system",
+      "severity": "high",
+      "keywords": [
+        "steering",
+        "steering pressure",
+        "power steering",
+        "steering pump",
+        "turning"
+      ]
+    },
+    {
+      "error_code": "CID 0700",
+      "error_description": "Cooling fan speed sensor fault - unable to read radiator fan RPM, risk of undetected cooling system failure and engine overheating",
+      "component": "cooling system",
+      "severity": "medium",
+      "keywords": [
+        "cooling fan",
+        "fan speed",
+        "radiator fan",
+        "overheating",
+        "fan motor"
+      ]
+    },
+    {
+      "error_code": "CID 0785",
+      "error_description": "Bucket/implement position sensor fault - implement angle or position reading abnormal, may affect auto-dig or grade control functions",
+      "component": "implement system",
+      "severity": "medium",
+      "keywords": [
+        "bucket",
+        "implement",
+        "position sensor",
+        "grade control",
+        "auto-dig",
+        "angle sensor"
+      ]
+    },
+    {
+      "error_code": "CID 0841",
+      "error_description": "Boom raise pressure sensor fault - boom cylinder pressure reading abnormal, may cause slow boom lift or unexpected lowering",
+      "component": "implement system",
+      "severity": "high",
+      "keywords": [
+        "boom",
+        "boom raise",
+        "cylinder pressure",
+        "lift",
+        "boom cylinder"
+      ]
+    },
+    {
+      "error_code": "CID 0842",
+      "error_description": "Stick (arm) cylinder pressure sensor fault - stick circuit pressure abnormal, excavator digging force may be reduced",
+      "component": "implement system",
+      "severity": "high",
+      "keywords": [
+        "stick",
+        "arm",
+        "cylinder",
+        "digging",
+        "breakout force",
+        "arm cylinder"
+      ]
+    },
+    {
+      "error_code": "CID 0269",
+      "error_description": "Ride control accumulator pressure sensor fault - ride control system pressure reading abnormal, rough ride and material spillage during travel",
+      "component": "hydraulic system",
+      "severity": "low",
+      "keywords": [
+        "ride control",
+        "accumulator",
+        "rough ride",
+        "travel",
+        "material spillage"
+      ]
+    },
+    {
+      "error_code": "CID 1665",
+      "error_description": "Tire pressure monitoring sensor fault - TPMS signal lost or reading abnormal for one or more tires, risk of blowout or uneven wear",
+      "component": "tires and rims",
+      "severity": "medium",
+      "keywords": [
+        "tire pressure",
+        "TPMS",
+        "tire",
+        "blowout",
+        "flat tire",
+        "wheel",
+        "rim"
+      ]
+    },
+    {
+      "error_code": "CID 1666",
+      "error_description": "Rim bolt torque monitoring fault - lug nut or rim bolt tension outside specification, risk of wheel separation during operation",
+      "component": "tires and rims",
+      "severity": "critical",
+      "keywords": [
+        "rim bolt",
+        "lug nut",
+        "wheel bolt",
+        "torque",
+        "wheel separation",
+        "rim"
+      ]
+    },
+    {
+      "error_code": "CID 0380",
+      "error_description": "Cab door interlock switch fault - cab door open/closed sensor malfunction, may prevent machine start or disable safety interlocks",
+      "component": "cab and glass",
+      "severity": "low",
+      "keywords": [
+        "cab door",
+        "interlock",
+        "door switch",
+        "cab",
+        "safety"
+      ]
+    },
+    {
+      "error_code": "CID 0381",
+      "error_description": "Cab glass wiper motor circuit fault - windshield wiper inoperative, reduced visibility in rain or dusty conditions",
+      "component": "cab and glass",
+      "severity": "low",
+      "keywords": [
+        "wiper",
+        "windshield",
+        "cab glass",
+        "visibility",
+        "wiper motor"
+      ]
+    },
+    {
+      "error_code": "CID 1770",
+      "error_description": "Handrail/step lighting circuit fault - access lighting on steps and handrails inoperative, increased fall risk during entry/exit",
+      "component": "steps and handrails",
+      "severity": "low",
+      "keywords": [
+        "handrail",
+        "steps",
+        "lighting",
+        "access",
+        "fall risk",
+        "entry"
+      ]
+    },
+    {
+      "error_code": "CID 0175",
+      "error_description": "Engine oil temperature sensor fault - oil temp reading abnormal, risk of undetected thermal breakdown of lubricant",
+      "component": "engine",
+      "severity": "medium",
+      "keywords": [
+        "oil temperature",
+        "engine oil",
+        "lubrication",
+        "thermal",
+        "oil cooler"
+      ]
+    },
+    {
+      "error_code": "CID 0105",
+      "error_description": "Intake manifold air pressure (boost) sensor fault - MAP sensor reading abnormal, affects fuel delivery and turbo boost control",
+      "component": "engine",
+      "severity": "medium",
+      "keywords": [
+        "MAP sensor",
+        "manifold pressure",
+        "boost",
+        "intake",
+        "turbo"
+      ]
+    },
+    {
+      "error_code": "CID 0527",
+      "error_description": "Starter motor relay circuit fault - starter solenoid not engaging, engine will not crank",
+      "component": "electrical system",
+      "severity": "high",
+      "keywords": [
+        "starter",
+        "cranking",
+        "no start",
+        "starter motor",
+        "solenoid",
+        "relay"
+      ]
+    },
+    {
+      "error_code": "CID 0622",
+      "error_description": "Glow plug circuit fault - pre-heat system malfunction, difficult cold-start in low ambient temperatures",
+      "component": "engine",
+      "severity": "medium",
+      "keywords": [
+        "glow plug",
+        "cold start",
+        "pre-heat",
+        "winter",
+        "cranking"
+      ]
+    },
+    {
+      "error_code": "CID 0898",
+      "error_description": "Track tension sensor fault - automatic track tensioner reading abnormal, risk of track throwing or accelerated undercarriage wear",
+      "component": "undercarriage",
+      "severity": "medium",
+      "keywords": [
+        "track tension",
+        "track",
+        "undercarriage",
+        "idler",
+        "sprocket",
+        "track throw"
+      ]
+    },
+    {
+      "error_code": "CID 0899",
+      "error_description": "Track link wear sensor fault - undercarriage wear measurement system reading abnormal, unable to predict track replacement interval",
+      "component": "undercarriage",
+      "severity": "low",
+      "keywords": [
+        "track wear",
+        "link wear",
+        "undercarriage",
+        "track life",
+        "pins",
+        "bushings"
+      ]
+    }
+  ]
+}

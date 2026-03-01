@@ -1,15 +1,15 @@
 // AudioService.swift
-// Gemini Live API — streams raw PCM audio to/from Gemini.
+// Cat AI Live API — streams raw PCM audio to/from Cat AI assistant.
 // Architecture:
-//   Mic → 16 kHz PCM → base64 → realtimeInput → Gemini
-//   Gemini → 24 kHz PCM → AVAudioPlayerNode → speaker
+//   Mic → 16 kHz PCM → base64 → realtimeInput → Cat AI
+//   Cat AI → 24 kHz PCM → AVAudioPlayerNode → speaker
 
 import Foundation
 import UIKit
 import AVFoundation
 import Speech
 
-// MARK: - Gemini Live Service
+// MARK: - Cat AI Live Service
 
 @MainActor
 final class AudioModalCaller: NSObject, ObservableObject {
@@ -34,7 +34,7 @@ final class AudioModalCaller: NSObject, ObservableObject {
     private let apiKey: String = {
         let key = ProcessInfo.processInfo.environment["GEMINI_API_KEY"] ?? ""
         if key.isEmpty {
-            print("[GeminiLive] ⚠️ GEMINI_API_KEY not set in scheme environment variables")
+            print("[CatAI] ⚠️ GEMINI_API_KEY not set in scheme environment variables")
         }
         return key
     }()
@@ -78,7 +78,7 @@ final class AudioModalCaller: NSObject, ObservableObject {
     // ── Playback state ───────────────────────────────────────────────────────
     private var isPlayingAudio        = false
     private var scheduledBufferCount  = 0
-    private var geminiTurnComplete    = true
+    private var aiTurnComplete    = true
     private var playbackEndWorkItem: DispatchWorkItem?
 
     // ── STT (UI transcript only) ─────────────────────────────────────────────
@@ -111,7 +111,7 @@ final class AudioModalCaller: NSObject, ObservableObject {
     override init() {
         super.init()
         audioEngine.attach(playerNode)
-        print("[GeminiLive] AudioModalCaller initialized")
+        print("[CatAI] AudioModalCaller initialized")
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -152,7 +152,7 @@ final class AudioModalCaller: NSObject, ObservableObject {
                 guard let self else { return }
                 Task { @MainActor in
                     if status != .authorized {
-                        print("[GeminiLive] Speech auth not granted — transcript display disabled")
+                        print("[CatAI] Speech auth not granted — transcript display disabled")
                     }
                     guard self.configureAudioSession() else { return }
                     self.connectWebSocket(inspectionID: inspectionID, taskID: taskID)
@@ -162,7 +162,7 @@ final class AudioModalCaller: NSObject, ObservableObject {
     }
 
     func stopLiveListening() {
-        print("[GeminiLive] stopLiveListening")
+        print("[CatAI] stopLiveListening")
 
         // STT
         recognitionTask?.cancel()
@@ -193,7 +193,7 @@ final class AudioModalCaller: NSObject, ObservableObject {
         dispatchedTagsThisTurn.removeAll()
         isPlayingAudio = false
         scheduledBufferCount = 0
-        geminiTurnComplete = true
+        aiTurnComplete = true
         playbackEndWorkItem?.cancel()
         playbackEndWorkItem = nil
         isImageProcessing = false
@@ -209,7 +209,7 @@ final class AudioModalCaller: NSObject, ObservableObject {
         // FIX: Don't reconfigure audio session if live session is active —
         // that would break the live pipeline.
         guard !isLiveListening else {
-            print("[GeminiLive] startRecording ignored: live session is active")
+            print("[CatAI] startRecording ignored: live session is active")
             return
         }
         let session = AVAudioSession.sharedInstance()
@@ -234,15 +234,15 @@ final class AudioModalCaller: NSObject, ObservableObject {
         return currentFileName
     }
 
-    /// Send a captured image to Gemini via the live WebSocket.
+    /// Send a captured image to Cat AI via the live WebSocket.
     func sendCapturedImageToWebSocket(fileName: String, note: String) {
         // FIX: Guard both isLiveListening AND websocketTask existence
         guard isLiveListening, websocketTask != nil else {
-            print("[GeminiLive] sendCapturedImageToWebSocket: no active session")
+            print("[CatAI] sendCapturedImageToWebSocket: no active session")
             return
         }
         guard !isImageProcessing else {
-            print("[GeminiLive] sendCapturedImageToWebSocket: image already processing")
+            print("[CatAI] sendCapturedImageToWebSocket: image already processing")
             return
         }
         isImageProcessing = true
@@ -254,7 +254,7 @@ final class AudioModalCaller: NSObject, ObservableObject {
             guard let self else { return }
             guard let base64 = Self.prepareImageBase64(imageURL: imageURL) else {
                 await MainActor.run { self.isImageProcessing = false }
-                print("[GeminiLive] sendCapturedImageToWebSocket: failed to encode image")
+                print("[CatAI] sendCapturedImageToWebSocket: failed to encode image")
                 return
             }
             let payload: [String: Any] = [
@@ -290,10 +290,10 @@ final class AudioModalCaller: NSObject, ObservableObject {
                 options: [.defaultToSpeaker, .allowBluetooth]
             )
             try session.setActive(true, options: .notifyOthersOnDeactivation)
-            print("[GeminiLive] ✅ Audio session configured")
+            print("[CatAI] ✅ Audio session configured")
             return true
         } catch {
-            print("[GeminiLive] ❌ Audio session error: \(error)")
+            print("[CatAI] ❌ Audio session error: \(error)")
             commandHandler?(.assistantText("Audio session error: \(error.localizedDescription)"))
             return false
         }
@@ -306,17 +306,17 @@ final class AudioModalCaller: NSObject, ObservableObject {
     private func startAudioPipeline() {
         let inputNode = audioEngine.inputNode
         let hwFormat  = inputNode.outputFormat(forBus: 0)
-        print("[GeminiLive] Mic hardware format: \(hwFormat)")
+        print("[CatAI] Mic hardware format: \(hwFormat)")
 
         // FIX: Guard against zero sample rate which would crash AVAudioConverter
         guard hwFormat.sampleRate > 0 else {
-            print("[GeminiLive] ❌ Invalid hardware format — sample rate is 0")
+            print("[CatAI] ❌ Invalid hardware format — sample rate is 0")
             commandHandler?(.assistantText("Audio hardware unavailable."))
             return
         }
 
         guard let converter = AVAudioConverter(from: hwFormat, to: sendFormat) else {
-            print("[GeminiLive] ❌ Failed to create AVAudioConverter")
+            print("[CatAI] ❌ Failed to create AVAudioConverter")
             commandHandler?(.assistantText("Audio conversion unavailable."))
             return
         }
@@ -392,9 +392,9 @@ final class AudioModalCaller: NSObject, ObservableObject {
             audioEngine.prepare()
             try audioEngine.start()
             playerNode.play()
-            print("[GeminiLive] ✅ Audio engine started")
+            print("[CatAI] ✅ Audio engine started")
         } catch {
-            print("[GeminiLive] ❌ Audio engine start failed: \(error)")
+            print("[CatAI] ❌ Audio engine start failed: \(error)")
             commandHandler?(.assistantText("Audio engine failed: \(error.localizedDescription)"))
         }
 
@@ -426,14 +426,14 @@ final class AudioModalCaller: NSObject, ObservableObject {
                     }
                 }
                 if let error {
-                    print("[GeminiLive] STT error (non-fatal): \(error.localizedDescription)")
+                    print("[CatAI] STT error (non-fatal): \(error.localizedDescription)")
                 }
             }
         }
     }
 
-    /// Decode Gemini's 24 kHz PCM audio and schedule on playerNode.
-    private func playGeminiAudio(_ base64Data: String) {
+    /// Decode Cat AI 24 kHz PCM audio and schedule on playerNode.
+    private func playCatAudio(_ base64Data: String) {
         guard let rawData = Data(base64Encoded: base64Data), !rawData.isEmpty else { return }
 
         // 16-bit samples = 2 bytes each
@@ -460,14 +460,14 @@ final class AudioModalCaller: NSObject, ObservableObject {
         }
     }
 
-    /// Unmute mic only after all buffers finish AND Gemini's turn is complete.
+    /// Unmute mic only after all buffers finish AND Cat AI's turn is complete.
     private func scheduleUnmuteIfReady() {
         playbackEndWorkItem?.cancel()
-        guard scheduledBufferCount == 0, geminiTurnComplete else { return }
+        guard scheduledBufferCount == 0, aiTurnComplete else { return }
 
         let workItem = DispatchWorkItem { [weak self] in
             guard let self else { return }
-            if self.scheduledBufferCount == 0 && self.geminiTurnComplete {
+            if self.scheduledBufferCount == 0 && self.aiTurnComplete {
                 self.isPlayingAudio = false
             }
         }
@@ -480,7 +480,7 @@ final class AudioModalCaller: NSObject, ObservableObject {
     // ─────────────────────────────────────────────────────────────────────────
 
     private func connectWebSocket(inspectionID: UUID, taskID: UUID) {
-        print("[GeminiLive] Connecting WebSocket…")
+        print("[CatAI] Connecting WebSocket…")
         websocketTask = wsSession.webSocketTask(with: wsEndpoint)
         websocketTask?.resume()
 
@@ -505,19 +505,19 @@ final class AudioModalCaller: NSObject, ObservableObject {
 
         guard let data = try? JSONSerialization.data(withJSONObject: setupMessage),
               let str  = String(data: data, encoding: .utf8) else {
-            print("[GeminiLive] ❌ Failed to serialize setup message")
+            print("[CatAI] ❌ Failed to serialize setup message")
             return
         }
 
-        print("[GeminiLive] Sending setup (\(str.count) chars)")
+        print("[CatAI] Sending setup (\(str.count) chars)")
         websocketTask?.send(.string(str)) { [weak self] error in
             if let error {
-                print("[GeminiLive] ❌ Setup send failed: \(error)")
+                print("[CatAI] ❌ Setup send failed: \(error)")
                 DispatchQueue.main.async {
                     self?.commandHandler?(.assistantText("Connection failed: \(error.localizedDescription)"))
                 }
             } else {
-                print("[GeminiLive] ✅ Setup sent, waiting for setupComplete…")
+                print("[CatAI] ✅ Setup sent, waiting for setupComplete…")
             }
         }
         receiveMessages()
@@ -531,7 +531,7 @@ final class AudioModalCaller: NSObject, ObservableObject {
                 case .failure(let error):
                     // FIX: Don't report errors after intentional teardown
                     guard self.websocketTask != nil else { return }
-                    print("[GeminiLive] ❌ WS receive error: \(error)")
+                    print("[CatAI] ❌ WS receive error: \(error)")
                     self.commandHandler?(.assistantText("Connection dropped."))
 
                 case .success(let msg):
@@ -554,13 +554,13 @@ final class AudioModalCaller: NSObject, ObservableObject {
     private func handleServerMessage(_ raw: String) {
         guard let data = raw.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            print("[GeminiLive] ⚠️ Unparseable server message")
+            print("[CatAI] ⚠️ Unparseable server message")
             return
         }
 
         // setupComplete → start audio pipeline
         if json["setupComplete"] != nil {
-            print("[GeminiLive] ✅ setupComplete — starting audio pipeline")
+            print("[CatAI] ✅ setupComplete — starting audio pipeline")
             setupAcknowledged = true
             isLiveListening = true
             startAudioPipeline()
@@ -575,7 +575,7 @@ final class AudioModalCaller: NSObject, ObservableObject {
             if let turn = content["modelTurn"] as? [String: Any],
                let parts = turn["parts"] as? [[String: Any]] {
 
-                geminiTurnComplete = false  // keep mic muted while Gemini speaks
+                aiTurnComplete = false  // keep mic muted while Cat AI speaks
 
                 for part in parts {
                     // Audio
@@ -583,7 +583,7 @@ final class AudioModalCaller: NSObject, ObservableObject {
                        let mime   = inline["mimeType"] as? String,
                        mime.contains("audio"),
                        let b64    = inline["data"] as? String {
-                        playGeminiAudio(b64)
+                        playCatAudio(b64)
                     }
                     // Text
                     if let text = part["text"] as? String {
@@ -595,9 +595,9 @@ final class AudioModalCaller: NSObject, ObservableObject {
 
             // turnComplete
             if let turnComplete = content["turnComplete"] as? Bool, turnComplete {
-                geminiTurnComplete = true
+                aiTurnComplete = true
 
-                // FIX: If Gemini responded with text only (no audio), we must
+                // FIX: If Cat AI responded with text only (no audio), we must
                 // still clear isPlayingAudio to re-enable the mic.
                 if scheduledBufferCount == 0 {
                     isPlayingAudio = false
@@ -621,7 +621,7 @@ final class AudioModalCaller: NSObject, ObservableObject {
 
             // Interruption — flush audio, unmute immediately
             if let interrupted = content["interrupted"] as? Bool, interrupted {
-                print("[GeminiLive] Interrupted by user")
+                print("[CatAI] Interrupted by user")
                 playerNode.stop()
                 // FIX: Reconnect playerNode after stop so future audio plays
                 audioEngine.disconnectNodeOutput(playerNode)
@@ -629,7 +629,7 @@ final class AudioModalCaller: NSObject, ObservableObject {
                 playerNode.play()
 
                 scheduledBufferCount = 0
-                geminiTurnComplete = true
+                aiTurnComplete = true
                 isPlayingAudio = false
                 playbackEndWorkItem?.cancel()
                 currentTurnTextBuffer = ""
@@ -769,7 +769,7 @@ final class AudioModalCaller: NSObject, ObservableObject {
                 wsSendQueue.remove(at: dropIdx)
             } else {
                 // Queue is full of control messages — drop new payload to protect ordering
-                print("[GeminiLive] ⚠️ WS send queue full, dropping payload")
+                print("[CatAI] ⚠️ WS send queue full, dropping payload")
                 return
             }
         }
@@ -789,7 +789,7 @@ final class AudioModalCaller: NSObject, ObservableObject {
             DispatchQueue.main.async {
                 self.wsSendInFlight = false
                 if let error {
-                    print("[GeminiLive] ❌ WS send error: \(error) — clearing queue")
+                    print("[CatAI] ❌ WS send error: \(error) — clearing queue")
                     self.wsSendQueue.removeAll()
                 } else {
                     self.drainSendQueue()
@@ -804,7 +804,8 @@ final class AudioModalCaller: NSObject, ObservableObject {
 
     private func buildSystemPrompt(inspectionID: UUID, taskID: UUID) -> String {
         """
-        You are an AI inspection assistant for Caterpillar heavy equipment.
+        You are Cat, the AI inspection assistant for Caterpillar heavy equipment.
+        The inspector calls you "Hey Cat" — respond to that naturally.
         Current task: \(taskContextTitle).
         Task description: \(taskContextDescription).
         Inspection ID: \(inspectionID.uuidString). Task ID: \(taskID.uuidString).
@@ -861,7 +862,7 @@ final class AudioModalCaller: NSObject, ObservableObject {
             recorder?.record()
             isRecording = true
         } catch {
-            print("[GeminiLive] ❌ Failed to create recorder: \(error)")
+            print("[CatAI] ❌ Failed to create recorder: \(error)")
             isRecording = false
         }
     }
@@ -877,7 +878,7 @@ final class AudioModalCaller: NSObject, ObservableObject {
 
     nonisolated private static func prepareImageBase64(imageURL: URL) -> String? {
         guard let image = UIImage(contentsOfFile: imageURL.path) else {
-            print("[GeminiLive] prepareImageBase64: no image at \(imageURL.lastPathComponent)")
+            print("[CatAI] prepareImageBase64: no image at \(imageURL.lastPathComponent)")
             return nil
         }
         var quality: CGFloat = 0.6
@@ -887,7 +888,7 @@ final class AudioModalCaller: NSObject, ObservableObject {
             data = image.jpegData(compressionQuality: quality)
         }
         guard let final = data, !final.isEmpty, final.count <= 700_000 else {
-            print("[GeminiLive] prepareImageBase64: image too large or empty")
+            print("[CatAI] prepareImageBase64: image too large or empty")
             return nil
         }
         return final.base64EncodedString()
@@ -899,19 +900,19 @@ final class AudioModalCaller: NSObject, ObservableObject {
 private final class WebSocketDelegate: NSObject, URLSessionWebSocketDelegate {
     func urlSession(_ s: URLSession, webSocketTask: URLSessionWebSocketTask,
                     didOpenWithProtocol p: String?) {
-        print("[GeminiLive] ✅ WebSocket opened")
+        print("[CatAI] ✅ WebSocket opened")
     }
     func urlSession(_ s: URLSession, webSocketTask: URLSessionWebSocketTask,
                     didCloseWith code: URLSessionWebSocketTask.CloseCode, reason: Data?) {
         let r = reason.flatMap { String(data: $0, encoding: .utf8) } ?? "none"
-        print("[GeminiLive] ⚠️ WebSocket closed — code: \(code.rawValue), reason: \(r)")
+        print("[CatAI] ⚠️ WebSocket closed — code: \(code.rawValue), reason: \(r)")
     }
     func urlSession(_ s: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         if let error {
-            print("[GeminiLive] ❌ Task error: \(error)")
+            print("[CatAI] ❌ Task error: \(error)")
         }
         if let http = task.response as? HTTPURLResponse {
-            print("[GeminiLive] HTTP upgrade status: \(http.statusCode)")
+            print("[CatAI] HTTP upgrade status: \(http.statusCode)")
         }
     }
 }

@@ -10,10 +10,22 @@ enum InspectionConfig {
         default: "https://your-modal-endpoint.modal.run"
     )
     /// Backend API — DB operations (report anomalies, order parts)
-    static let apiBaseURL = AppRuntimeConfig.string(
-        "CAT_BACKEND_API_URL",
-        default: "http://127.0.0.1:8000"
-    )
+    /// For physical devices: set CAT_BACKEND_API_URL to your Mac's LAN IP
+    /// e.g. "http://192.168.1.XXX:8000" — find via: ifconfig | grep "inet "
+    /// For Simulator: http://127.0.0.1:8000 works fine
+    static let apiBaseURL: String = {
+        let configured = AppRuntimeConfig.string("CAT_BACKEND_API_URL", default: "")
+        if !configured.isEmpty { return configured }
+        #if targetEnvironment(simulator)
+        return "http://127.0.0.1:8000"
+        #else
+        // On a real device, try to discover the Mac's Bonjour name
+        // Fallback: user must set CAT_BACKEND_API_URL in Info.plist or env
+        let fallback = "http://127.0.0.1:8000"
+        print("[InspectionConfig] WARNING: Using localhost for API — this won't work on a physical device. Set CAT_BACKEND_API_URL to your Mac's LAN IP (e.g. http://192.168.1.X:8000)")
+        return fallback
+        #endif
+    }()
 }
 
 // MARK: - Response models
@@ -204,10 +216,51 @@ actor InspectionNetworkService {
         parts: [[String: AnyCodableValue]]
     ) async throws -> OrderPartsResponse {
         let payload = OrderPartsRequest(inspectionId: inspectionId, parts: parts)
+        print("[Network] order-parts → \(InspectionConfig.apiBaseURL)/order-parts with \(parts.count) parts")
         return try await postJSON(
             url: "\(InspectionConfig.apiBaseURL)/order-parts",
             body: payload
         )
+    }
+    
+    /// Call API /inventory — list inventory items, optionally filtered
+    func listInventory(componentTag: String? = nil) async throws -> [[String: Any]] {
+        var urlString = "\(InspectionConfig.apiBaseURL)/inventory"
+        if let tag = componentTag, !tag.isEmpty {
+            urlString += "?component_tag=\(tag.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? tag)"
+        }
+        var request = URLRequest(url: URL(string: urlString)!)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 15
+        
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+            throw InspectionError.serverError(status, String(data: data, encoding: .utf8) ?? "")
+        }
+        
+        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        return json?["data"] as? [[String: Any]] ?? []
+    }
+    
+    /// Call API /orders — list orders for an inspection
+    func listOrders(inspectionId: String? = nil) async throws -> [[String: Any]] {
+        var urlString = "\(InspectionConfig.apiBaseURL)/orders"
+        if let id = inspectionId {
+            urlString += "?inspection_id=\(id)"
+        }
+        var request = URLRequest(url: URL(string: urlString)!)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 15
+        
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+            throw InspectionError.serverError(status, String(data: data, encoding: .utf8) ?? "")
+        }
+        
+        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        return json?["data"] as? [[String: Any]] ?? []
     }
     
     // MARK: - Helpers

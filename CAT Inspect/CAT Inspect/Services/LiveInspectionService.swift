@@ -40,6 +40,9 @@ final class LiveInspectionService: NSObject, ObservableObject {
     @Published var transcript: [TranscriptEntry] = []
     @Published var isPlaying = false
     @Published var isMuted = false
+    @Published var feedbackText: String = ""
+    @Published var annotatedImage: UIImage?
+    @Published var matchedErrorCodes: [[String: String]] = []
     
     // MARK: Config
     private let geminiAPIKey = AppRuntimeConfig.string("GEMINI_API_KEY")
@@ -66,6 +69,12 @@ final class LiveInspectionService: NSObject, ObservableObject {
     /// Last inspection result for report/order/edit
     private var lastInspectionResult: [String: Any]?
     
+    /// Last captured photo for bounding box annotations
+    private var lastCapturedImageData: Data?
+    
+    /// Error code database loaded from error_data.json
+    private var errorDatabase: [[String: Any]] = []
+    
     /// Network service
     private let network = InspectionNetworkService.shared
     
@@ -74,6 +83,7 @@ final class LiveInspectionService: NSObject, ObservableObject {
     func connect() {
         guard state == .idle || state.isError else { return }
         state = .connecting
+        loadErrorDatabase()
         
         Task {
             do {
@@ -200,7 +210,7 @@ final class LiveInspectionService: NSObject, ObservableObject {
             return
         }
         
-        // Setup audio player for Gemini responses (24kHz PCM16 mono)
+        // Setup audio player for Cat AI responses (24kHz PCM16 mono)
         playerFormat = AVAudioFormat(
             commonFormat: .pcmFormatInt16,
             sampleRate: 24000,
@@ -401,6 +411,10 @@ final class LiveInspectionService: NSObject, ObservableObject {
             result = await executeOrderParts(args: args)
         case "edit_findings":
             result = executeEditFindings(args: args)
+        case "write_feedback":
+            result = executeWriteFeedback(args: args)
+        case "lookup_error_codes":
+            result = executeLookupErrorCodes(args: args)
         default:
             result = ["error": "Unknown tool: \(name)"]
         }
@@ -438,6 +452,7 @@ final class LiveInspectionService: NSObject, ObservableObject {
         
         do {
             let imageData = try await delegate.capturePhotoData()
+            lastCapturedImageData = imageData
             addTranscript(.system("Photo captured (\(imageData.count / 1024)KB)"))
             
             // Now immediately run inspection with the captured image
@@ -457,6 +472,7 @@ final class LiveInspectionService: NSObject, ObservableObject {
         if let delegate = cameraDelegate {
             do {
                 let imageData = try await delegate.capturePhotoData()
+                lastCapturedImageData = imageData
                 addTranscript(.system("Photo captured for inspection"))
                 return await callModalInspect(imageData: imageData, voiceText: voiceText)
             } catch {
@@ -482,6 +498,12 @@ final class LiveInspectionService: NSObject, ObservableObject {
             // Store full result for later report/order tools
             let fullDict = encodeToDictionary(response)
             lastInspectionResult = fullDict
+            
+            // Draw bounding boxes on the captured image
+            drawBoundingBoxes(on: imageData, anomalies: fullDict["anomalies"] as? [[String: Any]] ?? [])
+            
+            // Auto-lookup error codes for the detected anomalies
+            autoMatchErrorCodes(from: fullDict)
             
             // Trim for speech (< 2KB)
             let trimmed = trimForSpeech(fullDict)
@@ -644,6 +666,253 @@ final class LiveInspectionService: NSObject, ObservableObject {
         lastInspectionResult = result
     }
     
+    // MARK: - Tool: write_feedback
+    
+    private func executeWriteFeedback(args: [String: Any]) -> [String: Any] {
+        let text = args["feedback_text"] as? String ?? ""
+        guard !text.isEmpty else {
+            return ["error": "No feedback text provided"]
+        }
+        feedbackText = text
+        addTranscript(.system("Feedback: \(text.prefix(100))"))
+        return ["status": "written", "feedback": text]
+    }
+    
+    // MARK: - Tool: lookup_error_codes
+    
+    private func executeLookupErrorCodes(args: [String: Any]) -> [String: Any] {
+        let query = (args["query"] as? String ?? "").lowercased()
+        let component = (args["component"] as? String ?? "").lowercased()
+        
+        guard !query.isEmpty || !component.isEmpty else {
+            return ["error": "Provide a query or component to search error codes"]
+        }
+        
+        let queryWords = Set(query.split(separator: " ").map { String($0) }.filter { $0.count >= 3 })
+        let componentWords = Set(component.split(separator: " ").map { String($0) }.filter { $0.count >= 2 })
+        
+        var scored: [(entry: [String: Any], score: Int)] = []
+        
+        for entry in errorDatabase {
+            let entryComponent = (entry["component"] as? String ?? "").lowercased()
+            let entryDescription = (entry["description"] as? String ?? "").lowercased()
+            let entryKeywords = (entry["keywords"] as? [String] ?? []).map { $0.lowercased() }
+            var score = 0
+            
+            // Exact component match
+            if !component.isEmpty && entryComponent.contains(component) {
+                score += 10
+            }
+            // Component word overlap
+            for w in componentWords {
+                if entryComponent.contains(w) { score += 5 }
+            }
+            // Query keywords vs entry keywords
+            for keyword in entryKeywords {
+                if query.contains(keyword) { score += 8 }
+                for w in queryWords {
+                    if keyword.contains(w) { score += 4 }
+                }
+            }
+            // Query words in description
+            for w in queryWords {
+                if entryDescription.contains(w) { score += 3 }
+            }
+            
+            if score > 0 {
+                scored.append((entry: entry, score: score))
+            }
+        }
+        
+        scored.sort { $0.score > $1.score }
+        let topMatches = scored.prefix(5).map { item -> [String: String] in
+            [
+                "code": item.entry["code"] as? String ?? "",
+                "description": item.entry["description"] as? String ?? "",
+                "component": item.entry["component"] as? String ?? "",
+                "severity": item.entry["severity"] as? String ?? ""
+            ]
+        }
+        
+        matchedErrorCodes = topMatches
+        
+        if topMatches.isEmpty {
+            return ["matches": 0, "message": "No matching error codes found"]
+        }
+        
+        return [
+            "matches": topMatches.count,
+            "error_codes": topMatches.map { "\($0["code"] ?? ""): \($0["description"] ?? "")" }
+        ]
+    }
+    
+    // MARK: - Bounding box drawing
+    
+    private func drawBoundingBoxes(on imageData: Data, anomalies: [[String: Any]]) {
+        guard let originalImage = UIImage(data: imageData), !anomalies.isEmpty else {
+            annotatedImage = nil
+            return
+        }
+        
+        let size = originalImage.size
+        let renderer = UIGraphicsImageRenderer(size: size)
+        
+        let result = renderer.image { context in
+            originalImage.draw(at: .zero)
+            let ctx = context.cgContext
+            
+            let colors: [String: UIColor] = [
+                "fail": .systemRed,
+                "critical": .systemRed,
+                "monitor": .systemOrange,
+                "normal": .systemGreen,
+                "pass": .systemGreen
+            ]
+            
+            let count = anomalies.count
+            let boxHeight = size.height / CGFloat(count + 1)
+            
+            for (index, anomaly) in anomalies.enumerated() {
+                let severity = (anomaly["severity"] as? String ?? "monitor").lowercased()
+                let issue = anomaly["issue"] as? String ?? "Issue \(index + 1)"
+                let color = colors[severity] ?? .systemYellow
+                
+                // If the anomaly has bounding_box data, use it; otherwise distribute evenly
+                let rect: CGRect
+                if let bbox = anomaly["bounding_box"] as? [String: Any] {
+                    let x = CGFloat(bbox["x"] as? Double ?? 0)
+                    let y = CGFloat(bbox["y"] as? Double ?? 0)
+                    let w = CGFloat(bbox["width"] as? Double ?? Double(size.width * 0.6))
+                    let h = CGFloat(bbox["height"] as? Double ?? Double(boxHeight))
+                    rect = CGRect(x: x, y: y, width: w, height: h)
+                } else {
+                    // Distribute boxes vertically across the image
+                    let margin = size.width * 0.05
+                    let y = margin + CGFloat(index) * (boxHeight + 10)
+                    rect = CGRect(
+                        x: margin,
+                        y: y,
+                        width: size.width - margin * 2,
+                        height: boxHeight * 0.8
+                    )
+                }
+                
+                // Draw border rectangle
+                ctx.setStrokeColor(color.cgColor)
+                ctx.setLineWidth(max(3, size.width * 0.005))
+                ctx.stroke(rect)
+                
+                // Draw label background
+                let labelHeight: CGFloat = max(24, size.height * 0.035)
+                let labelRect = CGRect(
+                    x: rect.origin.x,
+                    y: max(0, rect.origin.y - labelHeight),
+                    width: rect.width,
+                    height: labelHeight
+                )
+                ctx.setFillColor(color.withAlphaComponent(0.85).cgColor)
+                ctx.fill(labelRect)
+                
+                // Draw label text
+                let label = "#\(index + 1) \(severity.uppercased()): \(issue)"
+                let attrs: [NSAttributedString.Key: Any] = [
+                    .font: UIFont.boldSystemFont(ofSize: max(14, size.height * 0.02)),
+                    .foregroundColor: UIColor.white
+                ]
+                let nsLabel = label as NSString
+                nsLabel.draw(
+                    in: labelRect.insetBy(dx: 4, dy: 2),
+                    withAttributes: attrs
+                )
+            }
+        }
+        
+        annotatedImage = result
+        addTranscript(.system("Annotated image with \(anomalies.count) bounding boxes"))
+    }
+    
+    // MARK: - Auto-match error codes from inspection results
+    
+    private func autoMatchErrorCodes(from result: [String: Any]) {
+        let anomalies = result["anomalies"] as? [[String: Any]] ?? []
+        guard !anomalies.isEmpty, !errorDatabase.isEmpty else {
+            matchedErrorCodes = []
+            return
+        }
+        
+        var allMatches: [[String: String]] = []
+        
+        for anomaly in anomalies {
+            let issue = (anomaly["issue"] as? String ?? "").lowercased()
+            let component = (anomaly["component"] as? String ?? "").lowercased()
+            let description = (anomaly["description"] as? String ?? "").lowercased()
+            let combinedText = "\(issue) \(component) \(description)"
+            let words = Set(combinedText.split(separator: " ").map { String($0) }.filter { $0.count >= 3 })
+            
+            var bestScore = 0
+            var bestEntry: [String: Any]?
+            
+            for entry in errorDatabase {
+                let entryComponent = (entry["component"] as? String ?? "").lowercased()
+                let entryKeywords = (entry["keywords"] as? [String] ?? []).map { $0.lowercased() }
+                var score = 0
+                
+                if entryComponent.contains(component) || component.contains(entryComponent) {
+                    score += 10
+                }
+                for keyword in entryKeywords {
+                    for w in words {
+                        if keyword.contains(w) || w.contains(keyword) { score += 4 }
+                    }
+                    if combinedText.contains(keyword) { score += 6 }
+                }
+                
+                if score > bestScore {
+                    bestScore = score
+                    bestEntry = entry
+                }
+            }
+            
+            if bestScore >= 8, let entry = bestEntry {
+                allMatches.append([
+                    "code": entry["code"] as? String ?? "",
+                    "description": entry["description"] as? String ?? "",
+                    "component": entry["component"] as? String ?? "",
+                    "severity": entry["severity"] as? String ?? "",
+                    "matched_issue": anomaly["issue"] as? String ?? ""
+                ])
+            }
+        }
+        
+        matchedErrorCodes = allMatches
+        if !allMatches.isEmpty {
+            addTranscript(.system("Matched \(allMatches.count) error code(s) from database"))
+        }
+    }
+    
+    // MARK: - Error database loading
+    
+    private func loadErrorDatabase() {
+        guard let url = Bundle.main.url(forResource: "error_data", withExtension: "json"),
+              let data = try? Data(contentsOf: url),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let errors = json["errors"] as? [[String: Any]] else {
+            print("[ErrorDB] Could not load error_data.json from bundle")
+            return
+        }
+        
+        errorDatabase = errors.map { entry in
+            [
+                "code": entry["error_code"] as? String ?? "",
+                "description": entry["error_description"] as? String ?? "",
+                "component": entry["component"] as? String ?? "",
+                "severity": entry["severity"] as? String ?? "",
+                "keywords": entry["keywords"] as? [String] ?? []
+            ]
+        }
+        print("[ErrorDB] Loaded \(errorDatabase.count) error codes")
+    }
+    
     // MARK: - Trim for speech (< 2KB, numbered findings)
     
     private func trimForSpeech(_ result: [String: Any]) -> [String: Any] {
@@ -734,9 +1003,10 @@ final class LiveInspectionService: NSObject, ObservableObject {
     
     private var systemPrompt: String {
         """
-        You are an AI inspection assistant for CAT heavy equipment on the inspector's mobile device.
+        You are Cat, an AI inspection assistant for CAT heavy equipment on the inspector's mobile device.
+        The inspector calls you "Hey Cat" — respond to that naturally.
         
-        FLOW:
+        INSPECTION FLOW:
         1. When the user describes damage or asks to inspect something, call take_photo to capture \
         from the device camera and analyze it. The photo is sent to an AI vision model on GPU. \
         Tell the user "Taking a photo and running the inspection now, this will take about 30 seconds" \
@@ -744,7 +1014,8 @@ final class LiveInspectionService: NSObject, ObservableObject {
         
         2. After getting inspection results, read each finding with its NUMBER, severity, and issue. \
         Example: "Finding 1: FAIL — severe rim corrosion. Finding 2: MONITOR — missing lug nut." \
-        Then ask: "Would you like to correct or remove any findings before I save them?"
+        Then call lookup_error_codes for each significant finding to identify matching CAT diagnostic codes. \
+        After that, ask: "Would you like to correct or remove any findings before I save them?"
         
         3. If the inspector wants to change something, call edit_findings for each change. \
         After editing, read back the updated findings and ask again if they look correct.
@@ -757,12 +1028,17 @@ final class LiveInspectionService: NSObject, ObservableObject {
         "Should I check inventory and order replacement parts?" \
         If yes, call order_parts with confirmed=true.
         
+        6. Use write_feedback to display important summaries or action items on the inspector's screen.
+        
+        7. Use lookup_error_codes whenever the inspector asks about error codes, diagnostic trouble \
+        codes, or when you want to match detected anomalies to known CAT CID codes.
+        
         Keep responses short and clear. You are speaking through a phone speaker.
         Current equipment: \(equipmentId), task_id=\(taskId), inspection_id=\(inspectionId).
         """
     }
     
-    // MARK: - Tool declarations (JSON for Gemini)
+    // MARK: - Tool declarations (JSON for Cat AI)
     
     private var toolDeclarations: [String: Any] {
         [
@@ -851,6 +1127,38 @@ final class LiveInspectionService: NSObject, ObservableObject {
                             ]
                         ],
                         "required": ["confirmed"]
+                    ]
+                ],
+                [
+                    "name": "write_feedback",
+                    "description": "Write a feedback summary or note to the inspector's screen. Use this to display important findings, recommendations, or action items as text on the device.",
+                    "parameters": [
+                        "type": "OBJECT",
+                        "properties": [
+                            "feedback_text": [
+                                "type": "STRING",
+                                "description": "The text to display as feedback on the inspector's device"
+                            ]
+                        ],
+                        "required": ["feedback_text"]
+                    ]
+                ],
+                [
+                    "name": "lookup_error_codes",
+                    "description": "Search the CAT error code database for diagnostic trouble codes matching the detected issues. Use this after inspection to find relevant CID/FMI codes for the anomalies found.",
+                    "parameters": [
+                        "type": "OBJECT",
+                        "properties": [
+                            "query": [
+                                "type": "STRING",
+                                "description": "Description of the issue to look up (e.g. 'hydraulic pressure low', 'engine oil leak')"
+                            ],
+                            "component": [
+                                "type": "STRING",
+                                "description": "Component name to filter (e.g. 'hydraulic system', 'engine', 'fuel system')"
+                            ]
+                        ],
+                        "required": ["query"]
                     ]
                 ]
             ]

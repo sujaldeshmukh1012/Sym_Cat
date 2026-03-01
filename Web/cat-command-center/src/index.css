@@ -1,0 +1,160 @@
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&family=Rajdhani:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 7%;
+    --foreground: 0 0% 100%;
+
+    --card: 0 0% 10%;
+    --card-foreground: 0 0% 100%;
+
+    --popover: 0 0% 10%;
+    --popover-foreground: 0 0% 100%;
+
+    --primary: 47 100% 50%;
+    --primary-foreground: 0 0% 5%;
+
+    --secondary: 0 0% 15%;
+    --secondary-foreground: 0 0% 100%;
+
+    --muted: 0 0% 15%;
+    --muted-foreground: 0 0% 65%;
+
+    --accent: 47 100% 50%;
+    --accent-foreground: 0 0% 5%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 0 0% 20%;
+    --input: 0 0% 20%;
+    --ring: 47 100% 50%;
+
+    --radius: 0.25rem;
+
+    --cat-yellow: 47 100% 50%;
+    --machine-black: 0 0% 10%;
+    --alert-red: 0 72% 51%;
+
+    --sidebar-background: 0 0% 7%;
+    --sidebar-foreground: 0 0% 100%;
+    --sidebar-primary: 47 100% 50%;
+    --sidebar-primary-foreground: 0 0% 5%;
+    --sidebar-accent: 0 0% 15%;
+    --sidebar-accent-foreground: 0 0% 100%;
+    --sidebar-border: 0 0% 20%;
+    --sidebar-ring: 47 100% 50%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'Rajdhani', sans-serif;
+  }
+}
+
+@layer utilities {
+  .font-hud {
+    font-family: 'Orbitron', monospace;
+  }
+
+  .font-body {
+    font-family: 'Rajdhani', sans-serif;
+  }
+}
+
+@keyframes pulse-glow {
+  0%, 100% {
+    box-shadow: 0 0 10px hsl(47 100% 50% / 0.3), 0 0 30px hsl(47 100% 50% / 0.1);
+  }
+  50% {
+    box-shadow: 0 0 20px hsl(47 100% 50% / 0.6), 0 0 60px hsl(47 100% 50% / 0.2);
+  }
+}
+
+@keyframes scan-line {
+  0% { transform: translateY(-100%); }
+  100% { transform: translateY(100%); }
+}
+
+@keyframes text-flicker {
+  0%, 100% { opacity: 1; }
+  92% { opacity: 1; }
+  93% { opacity: 0.3; }
+  94% { opacity: 1; }
+  96% { opacity: 0.5; }
+  97% { opacity: 1; }
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+.animate-scan-line {
+  animation: scan-line 1.5s linear infinite;
+}
+
+.animate-text-flicker {
+  animation: text-flicker 4s ease-in-out infinite;
+}
+
+.glass-card {
+  background: hsl(0 0% 5% / 0.85);
+  backdrop-filter: blur(24px);
+  border: 1px solid hsl(47 100% 50% / 0.25);
+  box-shadow: 0 4px 30px rgba(0, 0, 0, 0.5);
+}
+
+/* ── Symbiote Logo Animations ── */
+
+.symbiote-logo-glow {
+  box-shadow: 0 0 10px rgba(255, 205, 0, 0.3), 0 0 30px rgba(255, 205, 0, 0.1);
+  animation: logo-pulse 3s ease-in-out infinite;
+}
+
+@keyframes logo-pulse {
+  0%, 100% {
+    box-shadow: 0 0 10px rgba(255, 205, 0, 0.3), 0 0 30px rgba(255, 205, 0, 0.1);
+  }
+  50% {
+    box-shadow: 0 0 15px rgba(255, 205, 0, 0.5), 0 0 45px rgba(255, 205, 0, 0.2);
+  }
+}
+
+/* Vertical scan beam that sweeps across the logo */
+.symbiote-scan-beam {
+  position: absolute;
+  top: -100%;
+  left: 0;
+  right: 0;
+  height: 200%;
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    transparent 42%,
+    rgba(255, 205, 0, 0.3) 48%,
+    rgba(255, 205, 0, 0.6) 50%,
+    rgba(255, 205, 0, 0.3) 52%,
+    transparent 58%,
+    transparent 100%
+  );
+  animation: scan-sweep 2.5s ease-in-out infinite;
+}
+
+@keyframes scan-sweep {
+  0%, 100% {
+    transform: translateY(0%);
+  }
+  50% {
+    transform: translateY(50%);
+  }
+}

@@ -3403,7 +3403,7 @@ private func appendFeedbackBullet(_ value: String) {
     photoFeedbackCount += 1
     let photoLabel = "Photo \(photoFeedbackCount):"
 
-    // Split Gemini's multi-line findings into individual lines
+    // Split Cat AI's multi-line findings into individual lines
     let lines = cleaned
         .components(separatedBy: .newlines)
         .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }

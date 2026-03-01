@@ -64,7 +64,7 @@ enum SupabaseConfig {
 enum BackendServiceConfig {
     static let apiBaseURL = AppRuntimeConfig.url(
         "CAT_BACKEND_API_URL",
-        default: "http://127.0.0.1:8000"
+        default: "http://172.16.51.119:8000"
     )
 }
 
