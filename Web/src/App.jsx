@@ -6,6 +6,7 @@ import Inventory from '../pages/Inventory'
 import MachineParts from '../pages/MachineParts'
 import Logs from '../pages/Logs'
 import Reports from '../pages/Reports'
+import OrderCart from '../pages/OrderCart'
 import './App.css'
 
 export default function App() {
@@ -36,6 +37,7 @@ export default function App() {
     parts: <MachineParts />,
     logs: <Logs />,
     reports: <Reports />,
+    order_cart: <OrderCart />,
   }
 
   return (

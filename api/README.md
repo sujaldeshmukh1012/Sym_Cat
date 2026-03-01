@@ -56,7 +56,7 @@ SUPABASE_S3_ENDPOINT=your_s3_endpoint
 SUPABASE_S3_ACCESS_KEY=your_s3_access_key
 SUPABASE_S3_SECRET_KEY=your_s3_secret_key
 SUPABASE_S3_REGION=your_s3_region
-CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
+CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5174, http://127.0.0.1:5175
 ```
 
 ## Python 3.14 Compatibility Note
