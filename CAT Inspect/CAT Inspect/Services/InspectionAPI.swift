@@ -59,7 +59,45 @@ enum SupabaseConfig {
 }
 
 enum BackendServiceConfig {
-    static let apiBaseURL = URL(string: "http://127.0.0.1:8000")!
+    /// The port the FastAPI server runs on.
+    static let port = 8000
+
+    /// Resolved once at launch. Priority:
+    ///  1. `CAT_BACKEND_URL` key in Info.plist  (set in CAT-Inspect-Info.plist)
+    ///  2. The device's own gateway / LAN-peer address (auto-discovered)
+    ///  3. `127.0.0.1` (simulator-only fallback)
+    static let apiBaseURL: URL = {
+        // 1) Info.plist
+        if let plistValue = Bundle.main.object(forInfoDictionaryKey: "CAT_BACKEND_URL") as? String,
+           !plistValue.isEmpty,
+           let url = URL(string: plistValue) {
+            print("[BackendServiceConfig] Using Info.plist URL: \(plistValue)")
+            return url
+        }
+
+        // 2) Auto-discover: get the device's Wi-Fi gateway IP
+        //    On a real device the server is on the same LAN, so the gateway
+        //    approach won't always give us the Mac. Use getifaddrs to find
+        //    the device's own IP prefix and try common .1 or broadcast.
+        //    Simpler: try the hardcoded development-machine IP.
+        #if targetEnvironment(simulator)
+        let fallback = "http://127.0.0.1:\(port)"
+        #else
+        // --- Replace this IP if your Mac address changes ---
+        let fallback = "http://172.16.51.119:\(port)"
+        #endif
+
+        print("[BackendServiceConfig] Using fallback URL: \(fallback)")
+        return URL(string: fallback)!
+    }()
+
+    /// WebSocket URL derived from the REST base URL.
+    static var wsURL: URL {
+        var components = URLComponents(url: apiBaseURL, resolvingAgainstBaseURL: false)!
+        components.scheme = apiBaseURL.scheme == "https" ? "wss" : "ws"
+        components.path = "/ws"
+        return components.url!
+    }
 }
 
 
@@ -686,7 +724,7 @@ final class SupabaseInspectionBackend {
     }
 
     private func renderPDFData(from html: String) async throws -> Data {
-        try await MainActor.run {
+        await MainActor.run {
             let renderer = HTMLPrintPageRenderer()
             let formatter = UIMarkupTextPrintFormatter(markupText: html)
             renderer.addPrintFormatter(formatter, startingAtPageAt: 0)

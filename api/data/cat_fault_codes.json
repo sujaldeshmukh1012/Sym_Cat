@@ -1,0 +1,44 @@
+[
+  {
+    "code": "P0300",
+    "title": "Engine Misfire Detected",
+    "description": "Random or multiple cylinder misfire detected. Engine may run rough and lose power.",
+    "recommended_action": "Inspect ignition and injector performance; verify compression and air-fuel balance.",
+    "source": "seeded_catalog"
+  },
+  {
+    "code": "P0524",
+    "title": "Low Engine Oil Pressure",
+    "description": "Engine oil pressure is below safe operating threshold and can cause severe wear.",
+    "recommended_action": "Stop machine if needed, verify oil level, inspect filter, pump, and oil pressure sensor.",
+    "source": "seeded_catalog"
+  },
+  {
+    "code": "P0217",
+    "title": "Engine Coolant Overtemperature",
+    "description": "Engine temperature exceeds calibrated limit and may lead to thermal damage.",
+    "recommended_action": "Allow cool-down, check coolant circulation, inspect radiator blockage and fan operation.",
+    "source": "seeded_catalog"
+  },
+  {
+    "code": "CID 0041 FMI 03",
+    "title": "8V DC Supply Voltage Above Normal",
+    "description": "Controller supply voltage is above expected operating range.",
+    "recommended_action": "Check charging system, regulator behavior, harness integrity, and ECU supply lines.",
+    "source": "seeded_catalog"
+  },
+  {
+    "code": "CID 0041 FMI 04",
+    "title": "8V DC Supply Voltage Below Normal",
+    "description": "Controller supply voltage is below expected operating range.",
+    "recommended_action": "Test battery state, alternator output, grounds, and connector resistance.",
+    "source": "seeded_catalog"
+  },
+  {
+    "code": "E1234",
+    "title": "Hydraulic Pressure Performance Alert",
+    "description": "Hydraulic pressure response is outside expected range under load.",
+    "recommended_action": "Inspect hydraulic fluid condition, filters, pump output, and valve response.",
+    "source": "seeded_catalog"
+  }
+]

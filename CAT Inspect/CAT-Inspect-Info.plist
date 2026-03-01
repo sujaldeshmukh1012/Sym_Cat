@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict/>
+	</array>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+	</dict>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>CAT Inspect needs local network access to connect to the inspection API server.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_catinspect._tcp</string>
+	</array>
+	<key>CAT_BACKEND_URL</key>
+	<string>http://172.16.51.119:8000</string>
+	<key>PICOVOICE_ACCESS_KEY</key>
+	<string>5G0g4xefrf7TNaV2PtFhqsVnqChUDp8b/dyQZqAVGXV+fdvLP7ARGA==</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>CAT Inspect needs microphone access for hands-free voice inspection and "Hey Cat" wake word detection.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>CAT Inspect uses speech recognition for hands-free equipment inspection.</string>
+
+</dict>
+</plist>

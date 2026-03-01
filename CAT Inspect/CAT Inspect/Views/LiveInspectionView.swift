@@ -9,7 +9,7 @@ import SwiftUI
 struct LiveInspectionView: View {
     let onClose: () -> Void
     
-    @StateObject private var service = LiveInspectionService()
+    @StateObject private var service = RelayLiveInspectionService()
     @StateObject private var cameraService = LiveCameraService()
     @State private var showTranscript = false
     
@@ -42,6 +42,7 @@ struct LiveInspectionView: View {
         .onAppear {
             cameraService.start()
             service.cameraDelegate = cameraService
+            service.startPassiveListening()
         }
         .onDisappear {
             service.disconnect()
@@ -121,6 +122,7 @@ struct LiveInspectionView: View {
     private var statusColor: Color {
         switch service.state {
         case .idle: return .gray
+        case .passiveListening: return .blue
         case .connecting: return .orange
         case .connected: return .green
         case .runningTool: return .yellow
@@ -148,7 +150,7 @@ struct LiveInspectionView: View {
                     .background(.ultraThinMaterial)
                     .clipShape(RoundedRectangle(cornerRadius: 16))
                     .padding(.horizontal, 16)
-                    .onChange(of: service.transcript.count) { _ in
+                    .onChange(of: service.transcript.count) {
                         if let last = service.transcript.last {
                             withAnimation {
                                 proxy.scrollTo(last.id, anchor: .bottom)
@@ -214,6 +216,8 @@ struct LiveInspectionView: View {
             Button {
                 switch service.state {
                 case .idle, .error:
+                    service.startPassiveListening()
+                case .passiveListening:
                     service.connect()
                 case .connected, .connecting, .runningTool:
                     service.disconnect()
@@ -257,6 +261,7 @@ struct LiveInspectionView: View {
     private var mainButtonColor: Color {
         switch service.state {
         case .idle, .error: return Color(red: 1.0, green: 0.804, blue: 0.067) // CAT Yellow
+        case .passiveListening: return .blue
         case .connecting: return .orange
         case .connected: return .red
         case .runningTool: return .yellow
@@ -266,6 +271,7 @@ struct LiveInspectionView: View {
     private var mainButtonIcon: String {
         switch service.state {
         case .idle, .error: return "waveform"
+        case .passiveListening: return "ear.fill"
         case .connecting: return "antenna.radiowaves.left.and.right"
         case .connected, .runningTool: return "stop.fill"
         }
@@ -282,7 +288,7 @@ struct LiveInspectionView: View {
 // MARK: - LiveCameraService (simplified, returns Data)
 
 @MainActor
-final class LiveCameraService: NSObject, ObservableObject, LiveInspectionCameraDelegate, @preconcurrency AVCapturePhotoCaptureDelegate {
+final class LiveCameraService: NSObject, ObservableObject, LiveInspectionCameraDelegate, AVCapturePhotoCaptureDelegate {
     let session = AVCaptureSession()
     private let output = AVCapturePhotoOutput()
     private var photoContinuation: CheckedContinuation<Data, Error>?

@@ -314,6 +314,7 @@ struct ContentView: View {
     @StateObject private var inspectionDB = InspectionDatabase()
     @StateObject private var reportStore = ReportStore()
     @StateObject private var profileStore = InspectorProfileStore()
+    @StateObject private var connectionManager = BackendConnectionManager.shared
     @AppStorage("catinspect.darkmode.enabled") private var isDarkModeEnabled = false
     @State private var selectedTab: RootTab = .fleet
     @State private var showGlobalSearch = false
@@ -327,6 +328,7 @@ struct ContentView: View {
                 FleetHomeView(
                     viewModel: viewModel,
                     profileStore: profileStore,
+                    connectionManager: connectionManager,
                     onOpenSearch: { showGlobalSearch = true },
                     onGoToInspections: { selectedTab = .inspections },
                     onInspectFleet: { formData in
@@ -429,7 +431,8 @@ struct ContentView: View {
             NavigationStack {
                 ProfileScreen(
                     isDarkModeEnabled: $isDarkModeEnabled,
-                    profileStore: profileStore
+                    profileStore: profileStore,
+                    connectionManager: connectionManager
                 )
             }
             .tag(RootTab.profile)
@@ -486,6 +489,8 @@ struct ContentView: View {
             viewModel.setInspectorProfile(name: profileStore.profile.fullName, region: profileStore.profile.region)
             await viewModel.loadIfNeeded()
             await reportStore.loadFromBackend()
+            // Connect WebSocket to local FastAPI
+            connectionManager.connect()
         }
     }
 }
@@ -495,6 +500,7 @@ struct ContentView: View {
 private struct FleetHomeView: View {
     @ObservedObject var viewModel: DashboardViewModel
     @ObservedObject var profileStore: InspectorProfileStore
+    @ObservedObject var connectionManager: BackendConnectionManager
     let onOpenSearch: () -> Void
     let onGoToInspections: () -> Void
     let onInspectFleet: (FleetInspectionFormData) async -> Void
@@ -506,6 +512,8 @@ private struct FleetHomeView: View {
     @State private var showLocationChoice = false
     @State private var prefilledLocation = ""
     @State private var prefilledLocationMode: InspectionLocationMode = .input
+    @State private var showConnectionFailureAlert = false
+    @State private var connectionFailureAcknowledged = false
 
     var body: some View {
         ScrollView {
@@ -529,11 +537,14 @@ private struct FleetHomeView: View {
                     )
                 }
 
-                if viewModel.connectionOffline {
+                if !connectionManager.state.isConnected {
                     OfflineBanner()
                 }
 
-                HeaderCard(profile: profileStore.profile)
+                HeaderCard(
+                    profile: profileStore.profile,
+                    isBackendConnected: connectionManager.state.isConnected
+                )
 
                 SectionHeader(title: "Fleet Actions", icon: "square.grid.2x2.fill")
                 VStack(spacing: 12) {
@@ -629,6 +640,38 @@ private struct FleetHomeView: View {
                 }
             }
         }
+        .onChange(of: connectionManager.state) { oldState, newState in
+            if newState.isConnected {
+                viewModel.connectionOffline = false
+                connectionFailureAcknowledged = false
+                showConnectionFailureAlert = false
+                return
+            }
+
+            let isFailureState: Bool
+            switch newState {
+            case .reconnecting, .disconnected:
+                isFailureState = true
+                viewModel.connectionOffline = true
+            case .connecting, .connected:
+                isFailureState = false
+            }
+
+            if isFailureState && !connectionFailureAcknowledged {
+                showConnectionFailureAlert = true
+            }
+        }
+        .alert("Backend Connection Failed", isPresented: $showConnectionFailureAlert) {
+            Button("Retry") {
+                connectionFailureAcknowledged = false
+                connectionManager.connect()
+            }
+            Button("OK", role: .cancel) {
+                connectionFailureAcknowledged = true
+            }
+        } message: {
+            Text("Unable to reach the backend right now.")
+        }
     }
 }
 
@@ -655,6 +698,7 @@ private struct CATNavTitle: View {
 
 private struct HeaderCard: View {
     let profile: InspectorProfile
+    let isBackendConnected: Bool
 
     var body: some View {
         HStack(spacing: 16) {
@@ -682,7 +726,8 @@ private struct HeaderCard: View {
 
             InspectorAvatarSquare(
                 imageData: profile.profileImageData,
-                initials: profile.fullName.initials
+                initials: profile.fullName.initials,
+                isBackendConnected: isBackendConnected
             )
         }
         .padding(16)
@@ -701,29 +746,52 @@ private struct HeaderCard: View {
 private struct InspectorAvatarSquare: View {
     let imageData: Data?
     let initials: String
+    let isBackendConnected: Bool
     var size: CGFloat = 62
 
+    init(
+        imageData: Data?,
+        initials: String = "",
+        isBackendConnected: Bool = false,
+        size: CGFloat = 62
+    ) {
+        self.imageData = imageData
+        self.initials = initials
+        self.isBackendConnected = isBackendConnected
+        self.size = size
+    }
+
     var body: some View {
-        Group {
-            if let imageData, let image = UIImage(data: imageData) {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFill()
-            } else {
-                ZStack {
-                    CATTheme.headerGradient
-                    Text(initials)
-                        .font(.headline.weight(.bold))
-                        .foregroundStyle(CATTheme.catBlack)
+        VStack(spacing: 6) {
+            Group {
+                if let imageData, let image = UIImage(data: imageData) {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                } else {
+                    ZStack {
+                        CATTheme.headerGradient
+                        Text(initials)
+                            .font(.headline.weight(.bold))
+                            .foregroundStyle(CATTheme.catBlack)
+                    }
                 }
             }
+            .frame(width: size, height: size)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(CATTheme.catYellow.opacity(0.35), lineWidth: 1.2)
+            )
+
+            Circle()
+                .fill(isBackendConnected ? CATTheme.success : CATTheme.critical)
+                .frame(width: 10, height: 10)
+                .overlay(
+                    Circle()
+                        .stroke(CATTheme.card, lineWidth: 1)
+                )
         }
-        .frame(width: size, height: size)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(CATTheme.catYellow.opacity(0.35), lineWidth: 1.2)
-        )
     }
 }
 
@@ -3377,10 +3445,10 @@ private final class VoiceFeedbackService: NSObject, ObservableObject, AVAudioRec
 
     func startRecording(inspectionID: UUID, taskID: UUID) {
         let session = AVAudioSession.sharedInstance()
-        try? session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth])
+        try? session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetoothHFP])
         try? session.setActive(true, options: .notifyOthersOnDeactivation)
 
-        session.requestRecordPermission { [weak self] granted in
+        AVAudioApplication.requestRecordPermission { [weak self] granted in
             guard granted, let self else { return }
             Task { @MainActor in
                 self.beginRecording(inspectionID: inspectionID, taskID: taskID)
@@ -3666,6 +3734,7 @@ private final class LocationPrefillService: NSObject, ObservableObject, @preconc
 private struct ProfileScreen: View {
     @Binding var isDarkModeEnabled: Bool
     @ObservedObject var profileStore: InspectorProfileStore
+    @ObservedObject var connectionManager: BackendConnectionManager
     @State private var selectedPhoto: PhotosPickerItem?
 
     private var binding: Binding<InspectorProfile> {
@@ -3685,6 +3754,7 @@ private struct ProfileScreen: View {
                     InspectorAvatarSquare(
                         imageData: profileStore.profile.profileImageData,
                         initials: profileStore.profile.fullName.initials,
+                        isBackendConnected: connectionManager.state.isConnected,
                         size: 84
                     )
                     VStack(alignment: .leading, spacing: 6) {

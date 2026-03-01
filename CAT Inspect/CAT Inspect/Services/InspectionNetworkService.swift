@@ -6,8 +6,11 @@ import UIKit
 enum InspectionConfig {
     /// Modal endpoint — AI vision analysis only (no DB writes)
     static let modalBaseURL = "https://manav-sharma-yeet--inspex-core-fastapi-app-dev.modal.run"
-    /// Local API via ngrok — DB operations (report anomalies, order parts)
-    static let apiBaseURL   = "https://karan-flowerless-glynda.ngrok-free.dev"
+    /// Local FastAPI — DB operations (report anomalies, order parts, fault codes, etc.)
+    /// Reads from the unified BackendServiceConfig so all endpoints use the same host.
+    static var apiBaseURL: String {
+        BackendServiceConfig.apiBaseURL.absoluteString
+    }
 }
 
 // MARK: - Response models

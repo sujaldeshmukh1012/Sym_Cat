@@ -74,7 +74,7 @@ final class LiveInspectionService: NSObject, ObservableObject {
         
         Task {
             do {
-                try await setupAudioSession()
+                try setupAudioSession()
                 try await openWebSocket()
                 try await sendSetup()
                 startMicStream()
@@ -105,7 +105,7 @@ final class LiveInspectionService: NSObject, ObservableObject {
     
     private func setupAudioSession() throws {
         let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetooth])
+        try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetoothHFP])
         try session.setPreferredSampleRate(16000)
         try session.setActive(true, options: .notifyOthersOnDeactivation)
     }
