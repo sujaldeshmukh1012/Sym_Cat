@@ -18,7 +18,7 @@ load_dotenv() # Load from .env file
 GEMINI_API_KEY  = os.environ.get("GEMINI_API_KEY")
 INSPEX_BASE_URL = "https://manav-sharma-yeet--inspex-core-fastapi-app-dev.modal.run"
 API_BASE_URL    = "http://localhost:8000"   # local FastAPI server
-TEST_IMAGE_PATH = "/Users/manav/Desktop/dev/projects/Sym_Cat/symbiote_core/data/test/BrokenRimBolt2.jpg"
+TEST_IMAGE_PATH = "C:/Users/priti/Downloads/Sym_Cat/symbiote_core/data/test/BrokenRimBolt1.jpg"
 
 FORMAT            = pyaudio.paInt16
 CHANNELS          = 1

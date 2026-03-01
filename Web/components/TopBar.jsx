@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import symbiote_logo from "./symbiote_logo.png"
 
 const PAGE_TITLES = {
   dashboard: 'Dashboard Overview',
@@ -32,8 +33,8 @@ export default function TopBar({ activePage }) {
   return (
     <header className="topbar">
       <div className="topbar-logo">
-        <div className="topbar-logo-mark">⚙</div>
-        Symbiote
+          <img src={symbiote_logo} alt="Symbiote Logo" className="topbar-logo-mark" />
+          <span>Symbiote</span>
       </div>
       <div className="topbar-divider" />
       <span className="topbar-page-title">{PAGE_TITLES[activePage]}</span>
