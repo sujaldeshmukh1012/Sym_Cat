@@ -1,5 +1,6 @@
 const NAV_ITEMS = [
   { key: 'dashboard', icon: '◈', label: 'Dashboard' },
+  { key: 'fleet_health_analytics', icon: '◉', label: 'Fleet Health Analytics' },
   { key: 'inventory', icon: '▦', label: 'Inventory' },
   { key: 'parts', icon: '⚙', label: 'Machine Specs' },
   { key: 'order_cart', icon: '🛒', label: 'Order Cart' },

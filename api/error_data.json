@@ -1,0 +1,40 @@
+{
+  "errors": [
+    {
+      "error_code": "CID 1116",
+      "error_description": "problem with the vehicle’s air-fuel ratio sensor circuit",
+      "component": "air fuel system",
+      "severity": "medium"
+    },
+    {
+      "error_code": "CID 1114",
+      "error_description": "problem with the air conditioning pressure sensor circuit",
+      "component": "ac system",
+      "severity": "medium"
+    },
+	{
+      "error_code": "CID 1080",
+      "error_description": "fault with the intake manifold temperature sensor circuit",
+      "component": "sensors",
+      "severity": "medium"
+    },
+	{
+      "error_code": "CID 0094",
+      "error_description": "Fuel Supply Pressure Sensor",
+      "component": "fuel system",
+      "severity": "high"
+    },
+	{
+      "error_code": "CID 0096",
+      "error_description": "Fuel Level Sensor",
+	  "component": "fuel sensors",
+      "severity": "medium"
+    },
+	{
+      "error_code": "Code 0168",
+      "error_description": "Electrical System Voltage",
+	  "component": "electrical system",
+      "severity": "high"
+    }
+  ]
+}

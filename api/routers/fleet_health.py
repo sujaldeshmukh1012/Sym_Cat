@@ -30,6 +30,26 @@ SEVERITY_WEIGHT = {
 }
 
 
+TASK_STATE_WEIGHT = {
+    "pass": 0.0,
+    "completed": 0.0,
+    "approved": 0.0,
+    "confirmed": 0.0,
+    "resolved": 0.0,
+    "normal": 0.25,
+    "monitor": 0.6,
+    "queued": 0.7,
+    "pending": 0.8,
+    "in_progress": 0.5,
+    "in progress": 0.5,
+    "in-progress": 0.5,
+    "inprogress": 0.5,
+    "fail": 3.0,
+    "failed": 3.0,
+    "rejected": 3.0,
+}
+
+
 def _parse_anomalies(raw_anomalies) -> list[dict]:
     """
     Parse anomalies from the task.anomolies column.
@@ -61,8 +81,8 @@ def _compute_inspection_score(tasks: list[dict]) -> float:
     if not tasks:
         return 100.0
 
-    total_weight = 0
-    max_possible = 0
+    total_weight = 0.0
+    max_possible = 0.0
 
     for task in tasks:
         anomalies = _parse_anomalies(task.get("anomolies"))
@@ -71,23 +91,24 @@ def _compute_inspection_score(tasks: list[dict]) -> float:
         # Each task contributes to the score
         max_possible += SEVERITY_WEIGHT["fail"]  # worst case per task
 
+        anomaly_weight = 0.0
+
         if not anomalies:
             # No anomalies = healthy task
-            total_weight += 0
+            anomaly_weight = 0.0
         else:
             # Worst severity among anomalies in this task
-            worst = max(
+            anomaly_weight = float(max(
                 SEVERITY_WEIGHT.get(
                     (a.get("severity") or "monitor").strip().lower(), 1
                 )
                 for a in anomalies
-            )
-            total_weight += worst
+            ))
 
-        # Also factor in task state
-        state_w = SEVERITY_WEIGHT.get(state, 0)
-        if state_w > total_weight:
-            total_weight = state_w
+        state_weight = TASK_STATE_WEIGHT.get(state, 0.0)
+
+        # Task penalty is the worse of anomaly severity vs task state severity.
+        total_weight += max(anomaly_weight, state_weight)
 
     if max_possible == 0:
         return 100.0

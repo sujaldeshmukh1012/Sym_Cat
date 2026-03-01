@@ -402,6 +402,11 @@ body {
 .badge-warning { background: var(--warning-light); color: var(--warning); }
 .badge-critical { background: var(--critical-light); color: var(--critical); }
 .badge-info { background: var(--info-light); color: var(--info); }
+.badge-info-soft {
+  background: color-mix(in srgb, var(--info-light) 45%, var(--card));
+  color: color-mix(in srgb, var(--info) 72%, var(--text-secondary));
+  border: 1px solid color-mix(in srgb, var(--info) 14%, var(--border));
+}
 .badge-neutral { background: var(--bg); color: var(--text-secondary); border: 1px solid var(--border); }
 
 .badge-dot {
@@ -731,6 +736,65 @@ input:focus, select:focus, textarea:focus {
   font-weight: 600;
 }
 
+.inventory-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--card) 88%, var(--bg));
+}
+
+.inventory-pagination-meta {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.inventory-pagination-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.inventory-page-list {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.inventory-page-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.inventory-page-btn:hover {
+  border-color: var(--primary);
+  color: var(--text-primary);
+}
+
+.inventory-page-btn.active {
+  background: var(--primary-light);
+  border-color: var(--primary);
+  color: var(--primary-dark);
+}
+
+.inventory-page-dots {
+  width: 20px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
 /* ─── MACHINE PARTS PAGE ─── */
 .machine-parts-shell {
   display: flex;
@@ -754,6 +818,7 @@ input:focus, select:focus, textarea:focus {
 
 .logs-text-cell {
   display: block;
+  text-align: inherit;
   white-space: pre-wrap;
   line-height: 1.35;
   max-height: 4.1em;
@@ -781,6 +846,7 @@ input:focus, select:focus, textarea:focus {
 
 .dashboard-refresh-btn {
   min-width: 124px;
+  margin-top: 4px;
   background: linear-gradient(135deg, var(--dash-cat-yellow) 0%, color-mix(in srgb, var(--dash-cat-yellow) 72%, #ffffff) 100%);
   color: var(--dash-cat-black);
   border: 1px solid color-mix(in srgb, var(--dash-cat-yellow) 65%, #000000);
@@ -827,6 +893,161 @@ input:focus, select:focus, textarea:focus {
 
 .dashboard-panel-card {
   border-color: color-mix(in srgb, var(--border) 82%, var(--dash-cat-yellow));
+}
+
+/* ─── FLEET HEALTH ANALYTICS PAGE ─── */
+.fleet-health-shell {
+  display: flex;
+  flex-direction: column;
+}
+
+.fleet-heatmap {
+  display: grid;
+  gap: 10px;
+}
+
+.fleet-heatmap-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.fleet-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.fleet-legend-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+}
+
+.fleet-legend-swatch.good { background: color-mix(in srgb, var(--success) 35%, var(--card)); }
+.fleet-legend-swatch.ok { background: color-mix(in srgb, var(--info) 35%, var(--card)); }
+.fleet-legend-swatch.warn { background: color-mix(in srgb, var(--warning) 35%, var(--card)); }
+.fleet-legend-swatch.bad { background: color-mix(in srgb, var(--critical) 35%, var(--card)); }
+
+.fleet-heatmap-row {
+  display: grid;
+  grid-template-columns: minmax(190px, 220px) 1fr;
+  align-items: center;
+  gap: 10px;
+}
+
+.fleet-heatmap-label {
+  min-width: 0;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fleet-heatmap-cells {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.fleet-heatmap-cell {
+  width: 40px;
+  height: 28px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+}
+
+.fleet-heatmap-cell.good {
+  background: color-mix(in srgb, var(--success-light) 82%, var(--card));
+  color: var(--success);
+}
+
+.fleet-heatmap-cell.ok {
+  background: color-mix(in srgb, var(--info-light) 78%, var(--card));
+  color: var(--info);
+}
+
+.fleet-heatmap-cell.warn {
+  background: color-mix(in srgb, var(--warning-light) 78%, var(--card));
+  color: var(--warning);
+}
+
+.fleet-heatmap-cell.bad {
+  background: color-mix(in srgb, var(--critical-light) 78%, var(--card));
+  color: var(--critical);
+}
+
+.dashboard-low-stock-alert {
+  align-items: center;
+  gap: 14px;
+  border-left-width: 5px;
+}
+
+.dashboard-low-stock-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  background: color-mix(in srgb, var(--warning-light) 72%, var(--card));
+  border: 1px solid color-mix(in srgb, var(--warning) 25%, var(--border));
+  flex-shrink: 0;
+}
+
+.dashboard-low-stock-content {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.dashboard-low-stock-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.dashboard-low-stock-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.dashboard-low-stock-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--warning) 20%, var(--border));
+  background: color-mix(in srgb, var(--warning-light) 62%, var(--card));
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.dashboard-low-stock-cta {
+  background: linear-gradient(135deg, var(--dash-cat-yellow) 0%, color-mix(in srgb, var(--dash-cat-yellow) 72%, #ffffff) 100%);
+  color: var(--dash-cat-black);
+  border: 1px solid color-mix(in srgb, var(--dash-cat-yellow) 65%, #000000);
+  font-weight: 700;
+}
+
+.dashboard-low-stock-cta:hover:not(:disabled) {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--dash-cat-yellow) 86%, #000000) 0%, var(--dash-cat-yellow) 100%);
+  color: var(--dash-cat-black);
 }
 
 :root[data-theme='dark'] .dashboard-header {
@@ -934,6 +1155,7 @@ input:focus, select:focus, textarea:focus {
   .main-content { padding: 16px; }
   .kpi-strip { grid-template-columns: 1fr 1fr; }
   .grid-2, .grid-3 { grid-template-columns: 1fr; }
+  .fleet-heatmap-row { grid-template-columns: 1fr; gap: 6px; }
   .page-header { flex-direction: column; }
   .topbar { padding: 0 16px; }
   .inventory-summary-strip { grid-template-columns: 1fr; }

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 
 const PAGE_TITLES = {
   dashboard: 'Dashboard Overview',
+  fleet_health_analytics: 'Fleet Health Analytics',
   inventory: 'Inventory Management',
   parts: 'Machine Specs',
   order_cart: 'Order Cart',

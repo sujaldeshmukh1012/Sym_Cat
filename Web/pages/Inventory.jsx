@@ -5,8 +5,10 @@ export default function Inventory() {
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+  const [currentPage, setCurrentPage] = useState(1)
   const [syncStatus, setSyncStatus] = useState('synced')
   const [error, setError] = useState(null)
+  const pageSize = 10
 
   useEffect(() => { fetchItems() }, [])
 
@@ -45,6 +47,32 @@ export default function Inventory() {
       String(item.component_tag ?? '').toLowerCase().includes(normalizedSearch)
     )
   })
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize))
+  const effectivePage = Math.min(currentPage, totalPages)
+  const startIndex = (effectivePage - 1) * pageSize
+  const endIndex = startIndex + pageSize
+  const paginatedItems = filtered.slice(startIndex, endIndex)
+
+  const showStart = filtered.length === 0 ? 0 : startIndex + 1
+  const showEnd = filtered.length === 0 ? 0 : Math.min(endIndex, filtered.length)
+
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [normalizedSearch, hasExactFleetMatch])
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages)
+    }
+  }, [currentPage, totalPages])
+
+  const pageNumbers = (() => {
+    if (totalPages <= 7) return Array.from({ length: totalPages }, (_, index) => index + 1)
+    if (effectivePage <= 4) return [1, 2, 3, 4, 5, '…', totalPages]
+    if (effectivePage >= totalPages - 3) return [1, '…', totalPages - 4, totalPages - 3, totalPages - 2, totalPages - 1, totalPages]
+    return [1, '…', effectivePage - 1, effectivePage, effectivePage + 1, '…', totalPages]
+  })()
 
   function formatCreatedAt(value) {
     if (!value) return '—'
@@ -150,7 +178,7 @@ export default function Inventory() {
                   </td>
                 </tr>
               ) : (
-                filtered.map(item => (
+                paginatedItems.map(item => (
                   <tr key={item.id}>
                     <td className="mono" style={{ color: 'var(--text-muted)', fontSize: 12, textAlign: 'center' }}>{item.fleet_serial ?? '—'}</td>
                     <td className="mono" style={{ color: 'var(--text-secondary)', textAlign: 'center' }}>{item.part_number || '—'}</td>
@@ -170,6 +198,48 @@ export default function Inventory() {
             </tbody>
           </table>
         </div>
+
+        {!loading && filtered.length > 0 && (
+          <div className="inventory-pagination">
+            <div className="inventory-pagination-meta">
+              Showing <span className="mono">{showStart}-{showEnd}</span> of <span className="mono">{filtered.length}</span>
+            </div>
+
+            <div className="inventory-pagination-controls">
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={() => setCurrentPage(page => Math.max(1, page - 1))}
+                disabled={effectivePage === 1}
+              >
+                ← Prev
+              </button>
+
+              <div className="inventory-page-list">
+                {pageNumbers.map((page, index) =>
+                  page === '…' ? (
+                    <span key={`dots-${index}`} className="inventory-page-dots">…</span>
+                  ) : (
+                    <button
+                      key={`page-${page}`}
+                      className={`inventory-page-btn${page === effectivePage ? ' active' : ''}`}
+                      onClick={() => setCurrentPage(page)}
+                    >
+                      {page}
+                    </button>
+                  )
+                )}
+              </div>
+
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={() => setCurrentPage(page => Math.min(totalPages, page + 1))}
+                disabled={effectivePage === totalPages}
+              >
+                Next →
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )
