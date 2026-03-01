@@ -1,8 +1,9 @@
 import json
 import logging
 from typing import Optional
+from datetime import datetime
 
-from fastapi import APIRouter
+from fastapi import APIRouter, File, Form, UploadFile
 from pydantic import BaseModel
 
 from api.routers import supabase
@@ -239,3 +240,147 @@ async def order_parts(payload: OrderPartsRequest):
             response.errors.append(msg)
 
     return response
+
+
+# ---------------------------------------------------------------------------
+# Quick Log — voice-activated single-issue logging
+# ---------------------------------------------------------------------------
+
+def _severity_to_task_state(severity: str) -> str:
+    """Map quick-log severity labels to task state values."""
+    s = severity.strip().lower()
+    if s in ("moderate", "monitor", "fail"):
+        return "monitor"
+    if s == "pass":
+        return "pass"
+    return "pending"  # Normal → pending (no action needed yet)
+
+
+@router.post("/quick-log")
+async def quick_log(
+    issue: str = Form(...),
+    severity: str = Form("Normal"),
+    component: str = Form("Unknown"),
+    equipment_id: str = Form("CAT-320-002"),
+    inspection_id: Optional[int] = Form(None),
+    photo: Optional[UploadFile] = File(None),
+):
+    """
+    Quick-log a single issue from the AI passive-listening mode.
+    Creates a task row directly — one issue = one task.
+    Optionally uploads a photo to Supabase Storage.
+    """
+    _log.info(
+        "quick-log: issue='%s' severity='%s' component='%s' equipment='%s' inspection=%s photo=%s",
+        issue, severity, component, equipment_id, inspection_id,
+        photo.filename if photo else "none",
+    )
+
+    image_urls = []
+
+    # Upload photo if provided
+    if photo and photo.filename:
+        try:
+            photo_bytes = await photo.read()
+            bucket = "inspection_key"
+            timestamp = int(datetime.now().timestamp())
+            remote_path = f"quicklogs/{equipment_id}/{timestamp}_{photo.filename}"
+            supabase.storage.from_(bucket).upload(
+                remote_path,
+                photo_bytes,
+                {"content-type": photo.content_type or "image/jpeg"},
+            )
+            public_url = f"{supabase.supabase_url}/storage/v1/object/public/{bucket}/{remote_path}"
+            image_urls.append(public_url)
+            _log.info("quick-log: photo uploaded -> %s", public_url)
+        except Exception as exc:
+            _log.warning("quick-log: photo upload failed: %s", exc)
+
+    # Build task row
+    anomaly_json = json.dumps({
+        "component": component,
+        "issue": issue,
+        "severity": severity.lower(),
+        "description": issue,
+        "recommended_action": "",
+    })
+
+    task_state = _severity_to_task_state(severity)
+    feedback_text = f"[AI Quick Log] {issue} — {component} ({severity})"
+
+    task_payload = {
+        "title": f"Quick Log: {component}",
+        "state": task_state,
+        "images": image_urls,
+        "anomolies": [anomaly_json],
+        "description": issue,
+        "feedback": feedback_text,
+    }
+
+    # Link to inspection if provided
+    if inspection_id is not None:
+        task_payload["inspection_id"] = inspection_id
+
+    # Resolve fleet_serial from equipment_id
+    try:
+        fleet_resp = (
+            supabase.table("fleet")
+            .select("id")
+            .ilike("serial_number", f"%{equipment_id}%")
+            .limit(1)
+            .execute()
+        )
+        if fleet_resp.data:
+            task_payload["fleet_serial"] = fleet_resp.data[0]["id"]
+    except Exception as exc:
+        _log.warning("quick-log: fleet lookup failed: %s", exc)
+
+    # Figure out next task index
+    if inspection_id is not None:
+        try:
+            existing = (
+                supabase.table("task")
+                .select("index")
+                .eq("inspection_id", inspection_id)
+                .order("index", desc=True)
+                .limit(1)
+                .execute()
+            )
+            max_idx = existing.data[0]["index"] if existing.data and existing.data[0].get("index") else 0
+            task_payload["index"] = (max_idx or 0) + 1
+        except Exception:
+            task_payload["index"] = 1
+    else:
+        task_payload["index"] = 1
+
+    # Insert task
+    try:
+        resp = supabase.table("task").insert(task_payload).execute()
+        task_id = resp.data[0]["id"] if resp.data else None
+        _log.info("quick-log: task created id=%s", task_id)
+
+        # If linked to an inspection, append to its tasks array
+        if inspection_id is not None and task_id is not None:
+            try:
+                insp = supabase.table("inspection").select("tasks").eq("id", inspection_id).execute()
+                current_tasks = insp.data[0].get("tasks") or [] if insp.data else []
+                current_tasks.append(task_id)
+                supabase.table("inspection").update({"tasks": current_tasks}).eq("id", inspection_id).execute()
+            except Exception as exc:
+                _log.warning("quick-log: failed to link task to inspection: %s", exc)
+
+        return {
+            "success": True,
+            "task_id": task_id,
+            "issue": issue,
+            "severity": severity,
+            "component": component,
+            "photo_url": image_urls[0] if image_urls else None,
+        }
+
+    except Exception as exc:
+        _log.error("quick-log: task insert failed: %s", exc)
+        return {
+            "success": False,
+            "error": str(exc),
+        }
