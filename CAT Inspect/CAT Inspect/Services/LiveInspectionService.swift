@@ -42,8 +42,8 @@ final class LiveInspectionService: NSObject, ObservableObject {
     @Published var isMuted = false
     
     // MARK: Config
-    private let geminiAPIKey = "AIzaSyC1Tt-eaeBx9Fn4mPQ1Y24XH1fTQjSVYhQ"
-    private let model = "gemini-2.5-flash-native-audio-preview-12-2025"
+    private let geminiAPIKey = AppRuntimeConfig.string("GEMINI_API_KEY")
+    private let model = AppRuntimeConfig.string("GEMINI_LIVE_MODEL", default: "gemini-2.5-flash-native-audio-preview-12-2025")
     private let voiceName = "Charon"
     
     var taskId: Int = 1
@@ -59,6 +59,9 @@ final class LiveInspectionService: NSObject, ObservableObject {
     private let audioEngine = AVAudioEngine()
     private let audioPlayer = AVAudioPlayerNode()
     private var playerFormat: AVAudioFormat?
+    private let audioLock = NSLock()
+    private var aiBufferCount = 0
+    private var _isMutedAtomic = false
     
     /// Last inspection result for report/order/edit
     private var lastInspectionResult: [String: Any]?
@@ -94,11 +97,18 @@ final class LiveInspectionService: NSObject, ObservableObject {
         webSocket?.cancel(with: .normalClosure, reason: nil)
         webSocket = nil
         state = .idle
+        audioStreamContinuation?.finish()
+        audioLock.lock()
+        aiBufferCount = 0
+        audioLock.unlock()
         addTranscript(.system("Disconnected"))
     }
     
     func toggleMute() {
         isMuted.toggle()
+        audioLock.lock()
+        _isMutedAtomic = isMuted
+        audioLock.unlock()
     }
     
     // MARK: - Audio session
@@ -113,7 +123,11 @@ final class LiveInspectionService: NSObject, ObservableObject {
     // MARK: - WebSocket
     
     private func openWebSocket() async throws {
-        let wsURL = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=\(geminiAPIKey)"
+        let key = geminiAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else {
+            throw LiveError.missingConfig("GEMINI_API_KEY")
+        }
+        let wsURL = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=\(key)"
         guard let url = URL(string: wsURL) else {
             throw LiveError.invalidURL
         }
@@ -124,7 +138,7 @@ final class LiveInspectionService: NSObject, ObservableObject {
         webSocket = urlSession?.webSocketTask(with: url)
         webSocket?.resume()
     }
-    
+
     // MARK: - Setup message
     
     private func sendSetup() async throws {
@@ -164,6 +178,8 @@ final class LiveInspectionService: NSObject, ObservableObject {
     
     // MARK: - Mic streaming
     
+    private var audioStreamContinuation: AsyncStream<Data>.Continuation?
+
     private func startMicStream() {
         let inputNode = audioEngine.inputNode
         let recordingFormat = inputNode.outputFormat(forBus: 0)
@@ -196,8 +212,25 @@ final class LiveInspectionService: NSObject, ObservableObject {
             audioEngine.connect(audioPlayer, to: audioEngine.mainMixerNode, format: pf)
         }
         
+        // Create a stream to serialize WebSocket sends
+        let stream = AsyncStream<Data> { continuation in
+            self.audioStreamContinuation = continuation
+        }
+        
+        Task {
+            for await data in stream {
+                try? await sendAudioChunk(data)
+            }
+        }
+
         inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { [weak self] buffer, _ in
-            guard let self, !self.isMuted else { return }
+            guard let self else { return }
+            
+            self.audioLock.lock()
+            let suppress = self.aiBufferCount > 0 || self._isMutedAtomic
+            self.audioLock.unlock()
+            
+            if suppress { return }
             
             let frameCount = AVAudioFrameCount(
                 Double(buffer.frameLength) * 16000.0 / recordingFormat.sampleRate
@@ -216,24 +249,8 @@ final class LiveInspectionService: NSObject, ObservableObject {
             let byteCount = Int(convertedBuffer.frameLength) * 2 // 16-bit = 2 bytes per sample
             guard let channelData = convertedBuffer.int16ChannelData else { return }
             let data = Data(bytes: channelData[0], count: byteCount)
-            let base64Audio = data.base64EncodedString()
             
-            let msg: [String: Any] = [
-                "realtime_input": [
-                    "media_chunks": [
-                        [
-                            "data": base64Audio,
-                            "mime_type": "audio/pcm;rate=16000"
-                        ]
-                    ]
-                ]
-            ]
-            
-            if let jsonData = try? JSONSerialization.data(withJSONObject: msg) {
-                Task { [weak self] in
-                    try? await self?.webSocket?.send(.data(jsonData))
-                }
-            }
+            self.audioStreamContinuation?.yield(data)
         }
         
         do {
@@ -241,6 +258,22 @@ final class LiveInspectionService: NSObject, ObservableObject {
         } catch {
             state = .error("Mic start failed: \(error.localizedDescription)")
         }
+    }
+
+    private func sendAudioChunk(_ data: Data) async throws {
+        let base64Audio = data.base64EncodedString()
+        let msg: [String: Any] = [
+            "realtime_input": [
+                "media_chunks": [
+                    [
+                        "data": base64Audio,
+                        "mime_type": "audio/pcm;rate=16000"
+                    ]
+                ]
+            ]
+        ]
+        let jsonData = try JSONSerialization.data(withJSONObject: msg)
+        try await webSocket?.send(.data(jsonData))
     }
     
     // MARK: - Receive loop
@@ -331,10 +364,20 @@ final class LiveInspectionService: NSObject, ObservableObject {
             audioPlayer.play()
         }
 
-        isPlaying = true
+        audioLock.lock()
+        aiBufferCount += 1
+        audioLock.unlock()
+        
+        Task { @MainActor in isPlaying = true }
+        
         audioPlayer.scheduleBuffer(buffer) { [weak self] in
-            Task { @MainActor in
-                self?.isPlaying = false
+            guard let self else { return }
+            self.audioLock.lock()
+            self.aiBufferCount -= 1
+            let count = self.aiBufferCount
+            self.audioLock.unlock()
+            if count == 0 {
+                Task { @MainActor in self.isPlaying = false }
             }
         }
     }
@@ -827,11 +870,13 @@ private extension LiveSessionState {
 enum LiveError: LocalizedError {
     case invalidURL
     case setupFailed(String)
+    case missingConfig(String)
     
     var errorDescription: String? {
         switch self {
         case .invalidURL: return "Invalid WebSocket URL"
         case .setupFailed(let s): return "Setup failed: \(s)"
+        case .missingConfig(let key): return "Missing config: \(key)"
         }
     }
 }

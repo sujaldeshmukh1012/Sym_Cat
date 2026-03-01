@@ -13,9 +13,9 @@ supabase_url = os.getenv("SUPABASE_URL")
 supabase_key = os.getenv("SUPABASE_KEY")
 
 if not supabase_url:
-    supabase_url = "https://axxxkhxsuigimqragicw.supabase.co"
+    raise RuntimeError("Missing SUPABASE_URL")
 if not supabase_key:
-    supabase_key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF4eHhraHhzdWlnaW1xcmFnaWN3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MjI1NzYyMywiZXhwIjoyMDg3ODMzNjIzfQ.8xTJC_hCRGdpv3J58UgzDe7BQiWaL5YR-jM7twPvsIQ"
+    raise RuntimeError("Missing SUPABASE_KEY")
 
 supabase: Client = create_client(supabase_url, supabase_key)
 

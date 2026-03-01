@@ -56,13 +56,13 @@ def get_supabase_client() -> Client | None:
     supabase_url = (
         os.getenv("SUPABASE_URL")
         or os.getenv("VITE_SUPABASE_URL")
-        or "https://axxxkhxsuigimqragicw.supabase.co"
+        or "https://your-project.supabase.co"
     )
     supabase_key = (
         os.getenv("SUPABASE_KEY")
         or os.getenv("SUPABASE_ANON_KEY")
         or os.getenv("VITE_SUPABASE_ANON_KEY")
-        or "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF4eHhraHhzdWlnaW1xcmFnaWN3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MjI1NzYyMywiZXhwIjoyMDg3ODMzNjIzfQ.8xTJC_hCRGdpv3J58UgzDe7BQiWaL5YR-jM7twPvsIQ"
+        or ""
     )
 
     if not supabase_url or not supabase_key:

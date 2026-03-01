@@ -403,6 +403,7 @@
 				INFOPLIST_KEY_NSCameraUsageDescription = "Camera access is required to scan Asset QR and CAT PIN codes.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Location is used to prefill inspection location when creating a new inspection.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Microphone is required to record task voice feedback during walk around.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Speech recognition is used for live inspection voice interaction.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -434,6 +435,7 @@
 				INFOPLIST_KEY_NSCameraUsageDescription = "Camera access is required to scan Asset QR and CAT PIN codes.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Location is used to prefill inspection location when creating a new inspection.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Microphone is required to record task voice feedback during walk around.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Speech recognition is used for live inspection voice interaction.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;

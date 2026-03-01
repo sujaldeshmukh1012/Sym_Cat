@@ -49,17 +49,23 @@ struct LiveInspectionAPIClient: InspectionAPIClient {
 }
 
 enum SupabaseConfig {
-    static let baseURL = URL(string: "https://axxxkhxsuigimqragicw.supabase.co")!
-    static let anonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF4eHhraHhzdWlnaW1xcmFnaWN3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MjI1NzYyMywiZXhwIjoyMDg3ODMzNjIzfQ.8xTJC_hCRGdpv3J58UgzDe7BQiWaL5YR-jM7twPvsIQ"
-    static let publishableKey = "sb_publishable_ZuuKxEPK62lNDHVIvRgLMg8aV8BXF"
-    static let bucketName = "inspection_key"
+    static let baseURL = AppRuntimeConfig.url(
+        "SUPABASE_URL",
+        default: "https://your-project.supabase.co"
+    )
+    static let anonKey = AppRuntimeConfig.string("SUPABASE_KEY")
+    static let publishableKey = AppRuntimeConfig.string("PUBLISHABLE_KEY")
+    static let bucketName = AppRuntimeConfig.string("SUPABASE_BUCKET_NAME", default: "inspection_key")
     static let storageObjectBaseURL: URL = {
         baseURL.appendingPathComponent("storage/v1/object")
     }()
 }
 
 enum BackendServiceConfig {
-    static let apiBaseURL = URL(string: "http://127.0.0.1:8000")!
+    static let apiBaseURL = AppRuntimeConfig.url(
+        "CAT_BACKEND_API_URL",
+        default: "http://127.0.0.1:8000"
+    )
 }
 
 

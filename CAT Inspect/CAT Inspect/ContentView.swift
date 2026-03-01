@@ -11,6 +11,7 @@ import VisionKit
 import AVFoundation
 import PDFKit
 import PhotosUI
+import Speech
 
 // MARK: - Caterpillar Dark Theme
 
@@ -2752,7 +2753,7 @@ private struct FleetInspectionWorkflowView: View {
     let onClose: () -> Void
 
     @StateObject private var cameraService = FleetCameraService()
-    @StateObject private var voiceService = VoiceFeedbackService()
+    @StateObject private var voiceService = AudioModalCaller()
     @State private var walkAroundActive = false
     @State private var selectedTaskID: UUID?
     @State private var feedbackText = ""
@@ -2762,6 +2763,9 @@ private struct FleetInspectionWorkflowView: View {
     @State private var sendStatusText = ""
     @State private var isTaskSyncing = false
     @State private var showReportComposer = false
+    @State private var liveVoiceStatus = ""
+    @State private var liveUserSnippet = ""
+    @State private var liveAISentence = ""
 
     private var record: FleetInspectionRecord? {
         inspectionDB.record(for: inspectionID)
@@ -2803,6 +2807,7 @@ private struct FleetInspectionWorkflowView: View {
         }
         .onDisappear {
             cameraService.stop()
+            voiceService.stopLiveListening()
         }
         .onChange(of: record?.tasks.count) { _, _ in
             if selectedTaskID == nil {
@@ -2901,6 +2906,11 @@ private struct FleetInspectionWorkflowView: View {
                 Text(sendStatusText)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(CATTheme.success)
+            }
+            if !liveVoiceStatus.isEmpty {
+                Text(liveVoiceStatus)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(CATTheme.info)
             }
 
             if !walkAroundActive {
@@ -3010,8 +3020,8 @@ private struct FleetInspectionWorkflowView: View {
                                     .fill(selectedTaskID == task.id ? AnyShapeStyle(CATTheme.headerGradient) : AnyShapeStyle(CATTheme.cardElevated))
                             )
                     }
-                    .disabled(voiceService.isRecording || isTaskSyncing)
-                    .opacity((voiceService.isRecording || isTaskSyncing) ? 0.5 : 1.0)
+                    .disabled(voiceService.isRecording || voiceService.isLiveListening || isTaskSyncing)
+                    .opacity((voiceService.isRecording || voiceService.isLiveListening || isTaskSyncing) ? 0.5 : 1.0)
                 }
             }
         }
@@ -3051,6 +3061,7 @@ private struct FleetInspectionWorkflowView: View {
             if !task.started {
                 Button {
                     inspectionDB.markTaskStarted(inspectionID: inspectionID, taskID: task.id)
+                    beginLiveAI(for: task.id)
                 } label: {
                     Text("Start Task")
                         .font(.subheadline.weight(.bold))
@@ -3064,9 +3075,15 @@ private struct FleetInspectionWorkflowView: View {
                 HStack(spacing: 8) {
                     Button {
                         guard capturedPhotoFileNames.count < 5 else { return }
+                        guard !voiceService.isImageProcessing else { return }
                         cameraService.capturePhoto { filename in
                             guard let filename else { return }
                             capturedPhotoFileNames.append(filename)
+                            liveVoiceStatus = "Image sent to AI for analysis..."
+                            voiceService.sendCapturedImageToWebSocket(
+                                fileName: filename,
+                                note: "User captured task image for immediate analysis."
+                            )
                         }
                     } label: {
                         Label("Capture Photo (\(capturedPhotoFileNames.count)/5)", systemImage: "camera.fill")
@@ -3076,19 +3093,22 @@ private struct FleetInspectionWorkflowView: View {
                     .foregroundStyle(CATTheme.catBlack)
                     .background(CATTheme.headerGradient)
                     .clipShape(RoundedRectangle(cornerRadius: 10))
-                    .disabled(capturedPhotoFileNames.count >= 5 || isTaskSyncing)
-                    .opacity((capturedPhotoFileNames.count >= 5 || isTaskSyncing) ? 0.5 : 1.0)
+                    .disabled(capturedPhotoFileNames.count >= 5 || isTaskSyncing || voiceService.isImageProcessing)
+                    .opacity((capturedPhotoFileNames.count >= 5 || isTaskSyncing || voiceService.isImageProcessing) ? 0.5 : 1.0)
 
                     Button {
-                        if voiceService.isRecording {
-                            voiceService.stopRecording()
+                        if voiceService.isLiveListening {
+                            voiceService.stopLiveListening()
+                            liveVoiceStatus = "Live AI stopped."
+                            liveUserSnippet = ""
+                            liveAISentence = ""
                         } else {
-                            voiceService.startRecording(inspectionID: inspectionID, taskID: task.id)
+                            beginLiveAI(for: task.id)
                         }
                     } label: {
                         Label(
-                            voiceService.isRecording ? "Stop Capture Voice" : "Capture Voice",
-                            systemImage: voiceService.isRecording ? "stop.circle.fill" : "mic.fill"
+                            voiceService.isLiveListening ? "Talk to AI (On)" : "Talk to AI",
+                            systemImage: voiceService.isLiveListening ? "waveform.circle.fill" : "waveform.circle"
                         )
                         .font(.caption.weight(.bold))
                         .frame(maxWidth: .infinity, minHeight: 40)
@@ -3104,6 +3124,19 @@ private struct FleetInspectionWorkflowView: View {
                     )
                     .disabled(isTaskSyncing)
                     .opacity(isTaskSyncing ? 0.5 : 1.0)
+                }
+
+                if !liveUserSnippet.isEmpty || !liveAISentence.isEmpty {
+                    LiveConversationPanel(userSnippet: liveUserSnippet, aiSentence: liveAISentence)
+                }
+                if voiceService.isImageProcessing {
+                    HStack(spacing: 6) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("Analyzing image...")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(CATTheme.info)
+                    }
                 }
 
                 if !capturedPhotoFileNames.isEmpty {
@@ -3142,6 +3175,7 @@ private struct FleetInspectionWorkflowView: View {
 
                 Button {
                     isTaskSyncing = true
+                    voiceService.stopLiveListening()
                     Task {
                         let audioFileName = await voiceService.stopAndStream(
                             inspectionID: inspectionID,
@@ -3197,6 +3231,13 @@ private struct FleetInspectionWorkflowView: View {
         selectedWalkthroughStatus = task.walkthroughStatus
         capturedPhotoFileNames = task.photoFileNames
         selectedPreviewPhotoFileName = nil
+        if task.started && !task.completed {
+            beginLiveAI(for: task.id)
+        } else {
+            voiceService.stopLiveListening()
+            liveUserSnippet = ""
+            liveAISentence = ""
+        }
     }
 
     private func nextTaskID(after taskID: UUID) -> UUID? {
@@ -3215,6 +3256,128 @@ private struct FleetInspectionWorkflowView: View {
             return CATTheme.success
         }
         return CATTheme.heading
+    }
+
+    private func beginLiveAI(for taskID: UUID) {
+        let task = record?.tasks.first(where: { $0.id == taskID })
+        liveVoiceStatus = "Connecting live AI..."
+        liveUserSnippet = ""
+        liveAISentence = ""
+        voiceService.startLiveListening(
+            inspectionID: inspectionID,
+            taskID: taskID,
+            taskTitle: task?.title ?? "",
+            taskDescription: task?.detail ?? ""
+        ) { command in
+            switch command {
+            case .capturePhoto:
+                guard capturedPhotoFileNames.count < 5 else { return }
+                guard !voiceService.isImageProcessing else { return }
+                cameraService.capturePhoto { filename in
+                    guard let filename else { return }
+                    capturedPhotoFileNames.append(filename)
+                    liveVoiceStatus = "Image sent to AI for analysis..."
+                    voiceService.sendCapturedImageToWebSocket(
+                        fileName: filename,
+                        note: "AI-triggered captured image for immediate analysis."
+                    )
+                }
+            case .assistantText(let text):
+                liveVoiceStatus = "AI: \(text)"
+                updateLiveAISentence(text)
+            case .userText(let text):
+                updateLiveUserSnippet(text)
+            case .imageFeedback(let text):
+                liveVoiceStatus = "Image analysis received."
+                updateLiveAISentence(text)
+                appendFeedbackBullet(text)
+            }
+        }
+    }
+
+    private func appendFeedbackBullet(_ value: String) {
+        let cleaned = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty else { return }
+        if feedbackText.contains(cleaned) { return }
+        if feedbackText.isEmpty {
+            feedbackText = "• \(cleaned)"
+        } else {
+            feedbackText += "\n• \(cleaned)"
+        }
+    }
+
+    private func updateLiveUserSnippet(_ text: String) {
+        let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty else { return }
+        if liveUserSnippet == cleaned { return }
+        liveUserSnippet = String(cleaned.suffix(80))
+    }
+
+    private func updateLiveAISentence(_ text: String) {
+        let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty else { return }
+        let normalized = normalizeAssistantText(cleaned)
+        if liveAISentence == normalized { return }
+        liveAISentence = String(normalized.prefix(150))
+    }
+
+    private func normalizeAssistantText(_ text: String) -> String {
+        if let data = text.data(using: .utf8),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            if let ai = json["assistant_text"] as? String, !ai.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return ai
+            }
+            if let textValue = json["text"] as? String, !textValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return textValue
+            }
+            if let message = json["message"] as? String, !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return message
+            }
+            if let error = json["error"] as? String, !error.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return "AI error: \(error)"
+            }
+        }
+        return text
+    }
+}
+
+private struct LiveConversationPanel: View {
+    let userSnippet: String
+    let aiSentence: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 5) {
+                Image(systemName: "waveform.path.ecg")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(CATTheme.info)
+                Text("Live")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(CATTheme.heading)
+            }
+            if !userSnippet.isEmpty {
+                Text("You: \(userSnippet)")
+                    .font(.caption2)
+                    .foregroundStyle(CATTheme.muted)
+                    .lineLimit(1)
+            }
+            if !aiSentence.isEmpty {
+                Text("AI: \(aiSentence)")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(CATTheme.body)
+                    .lineLimit(2)
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(CATTheme.card)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(CATTheme.cardBorder, lineWidth: 1)
+                )
+        )
     }
 }
 
@@ -3368,86 +3531,7 @@ private final class FleetCameraService: NSObject, ObservableObject, @preconcurre
     }
 }
 
-@MainActor
-private final class VoiceFeedbackService: NSObject, ObservableObject, AVAudioRecorderDelegate {
-    @Published var isRecording = false
-
-    private var recorder: AVAudioRecorder?
-    private var currentFileName: String?
-
-    func startRecording(inspectionID: UUID, taskID: UUID) {
-        let session = AVAudioSession.sharedInstance()
-        try? session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth])
-        try? session.setActive(true, options: .notifyOthersOnDeactivation)
-
-        session.requestRecordPermission { [weak self] granted in
-            guard granted, let self else { return }
-            Task { @MainActor in
-                self.beginRecording(inspectionID: inspectionID, taskID: taskID)
-            }
-        }
-    }
-
-    func stopRecording() {
-        recorder?.stop()
-        isRecording = false
-    }
-
-    func stopAndStream(
-        inspectionID: UUID,
-        taskID: UUID,
-        feedbackText: String,
-        photoFileName: String?
-    ) async -> String? {
-        if isRecording {
-            stopRecording()
-        }
-        guard let audioFile = currentFileName else { return nil }
-        _ = await submitToBackend(
-            inspectionID: inspectionID,
-            taskID: taskID,
-            feedbackText: feedbackText,
-            photoFileName: photoFileName,
-            audioFileName: audioFile
-        )
-        return audioFile
-    }
-
-    private func beginRecording(inspectionID: UUID, taskID: UUID) {
-        let name = "audio_\(inspectionID.uuidString.prefix(6))_\(taskID.uuidString.prefix(6))_\(Int(Date().timeIntervalSince1970)).m4a"
-        let url = storageDirectory().appendingPathComponent(name)
-        currentFileName = name
-
-        let settings: [String: Any] = [
-            AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
-            AVSampleRateKey: 44100,
-            AVNumberOfChannelsKey: 1,
-            AVEncoderAudioQualityKey: AVAudioQuality.medium.rawValue
-        ]
-        recorder = try? AVAudioRecorder(url: url, settings: settings)
-        recorder?.delegate = self
-        recorder?.record()
-        isRecording = true
-    }
-
-    private func submitToBackend(
-        inspectionID: UUID,
-        taskID: UUID,
-        feedbackText: String,
-        photoFileName: String?,
-        audioFileName: String
-    ) async -> Bool {
-        // Backend submission hook: replace with your inspection feedback API call.
-        // Send inspectionID, taskID, feedbackText, photo file, and audio file.
-        try? await Task.sleep(nanoseconds: 350_000_000)
-        return true
-    }
-
-    private func storageDirectory() -> URL {
-        let base = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
-        return base ?? URL(fileURLWithPath: NSTemporaryDirectory())
-    }
-}
+// AudioModalCaller is defined in AudioService.swift
 
 private enum ScanMode {
     case assetQR

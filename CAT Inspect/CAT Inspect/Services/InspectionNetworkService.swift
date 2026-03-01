@@ -5,9 +5,15 @@ import UIKit
 
 enum InspectionConfig {
     /// Modal endpoint — AI vision analysis only (no DB writes)
-    static let modalBaseURL = "https://manav-sharma-yeet--inspex-core-fastapi-app-dev.modal.run"
-    /// Local API via ngrok — DB operations (report anomalies, order parts)
-    static let apiBaseURL   = "https://karan-flowerless-glynda.ngrok-free.dev"
+    static let modalBaseURL = AppRuntimeConfig.string(
+        "INSPEX_MODAL_BASE_URL",
+        default: "https://your-modal-endpoint.modal.run"
+    )
+    /// Backend API — DB operations (report anomalies, order parts)
+    static let apiBaseURL = AppRuntimeConfig.string(
+        "CAT_BACKEND_API_URL",
+        default: "http://127.0.0.1:8000"
+    )
 }
 
 // MARK: - Response models

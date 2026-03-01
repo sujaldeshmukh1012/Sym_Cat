@@ -24,6 +24,13 @@ SUPABASE_S3_ACCESS_KEY=YOUR_S3_ACCESS_KEY
 SUPABASE_S3_SECRET_KEY=YOUR_S3_SECRET_KEY
 SUPABASE_S3_REGION=us-west-2
 CAT_BACKEND_API_URL=http://127.0.0.1:8000
+GEMINI_API_KEY=YOUR_GEMINI_API_KEY
+GEMINI_LIVE_MODEL=gemini-2.5-flash-native-audio-preview-12-2025
+GEMINI_LIVE_TEXT_MODEL=gemini-2.5-flash
+INSPEX_MODAL_BASE_URL=https://YOUR_MODAL_ENDPOINT.modal.run
+CAT_LIVE_WS_URL=ws://127.0.0.1:8000/ws/live-inspection
+INSPEX_BASE_URL=https://YOUR_MODAL_ENDPOINT.modal.run
+API_BASE_URL=http://127.0.0.1:8000
 ```
 
 Code reads keys from:
@@ -39,6 +46,17 @@ Where each key is used:
 - `SUPABASE_BUCKET_NAME`: iOS task-image uploads path target
 - `CAT_BACKEND_API_URL`: iOS report submit calls `POST /reports/generate/{inspection_id}?run_async=false`
 - `SUPABASE_S3_*`: Python API router uploads generated PDF to Supabase S3 endpoint
+- `GEMINI_API_KEY`, `GEMINI_LIVE_MODEL`: iOS `LiveInspectionService` Gemini live session
+- `INSPEX_MODAL_BASE_URL`: iOS `InspectionNetworkService` `/inspect` endpoint
+- `CAT_LIVE_WS_URL`: iOS walkaround live voice websocket endpoint
+- `INSPEX_BASE_URL`, `API_BASE_URL`: Python `api/test_live.py` endpoints
+- `GEMINI_LIVE_TEXT_MODEL`: backend websocket relay model for `/ws/live-inspection`
+
+For iOS Gemini live keys, set one of these:
+1. Xcode Scheme Environment Variables (Run -> Arguments)
+2. `Info.plist` custom keys with the same names:
+   - `GEMINI_API_KEY`
+   - `GEMINI_LIVE_MODEL`
 
 ## 2) Which endpoints are being called right now
 

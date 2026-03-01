@@ -21,13 +21,13 @@ SUPABASE_URL = os.getenv("SUPABASE_URL")
 if not BUCKET_NAME:
     BUCKET_NAME = "inspection_key"
 if not SUPABASE_URL:
-    SUPABASE_URL = "https://axxxkhxsuigimqragicw.supabase.co"
+    SUPABASE_URL = "https://your-project.supabase.co"
 
 s3_client = boto3.client(
     "s3",
-    endpoint_url=os.getenv("SUPABASE_S3_ENDPOINT") or "https://axxxkhxsuigimqragicw.storage.supabase.co/storage/v1/s3",
-    aws_access_key_id=os.getenv("SUPABASE_S3_ACCESS_KEY") or "4e5e5c5168fc5b949f648aa5024489ae",
-    aws_secret_access_key=os.getenv("SUPABASE_S3_SECRET_KEY") or "454af5f5895e0fee2a9e9052cd55be3064dc84b80a09c18ff6d728c470fc9ac1",
+    endpoint_url=os.getenv("SUPABASE_S3_ENDPOINT") or "https://your-project.storage.supabase.co/storage/v1/s3",
+    aws_access_key_id=os.getenv("SUPABASE_S3_ACCESS_KEY") or "your_s3_access_key",
+    aws_secret_access_key=os.getenv("SUPABASE_S3_SECRET_KEY") or "your_s3_secret_key",
     region_name=os.getenv("SUPABASE_S3_REGION") or "us-west-2",
     config=Config(s3={"addressing_style": "path"}),
 )

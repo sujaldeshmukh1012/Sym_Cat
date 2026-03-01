@@ -1,4 +1,5 @@
 import asyncio
+import argparse
 import base64
 import json
 import os
@@ -6,16 +7,18 @@ import traceback
 
 import aiohttp
 import pyaudio
+import websockets
 from google import genai
 from google.genai import types
 
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
-GEMINI_API_KEY  = ""
-INSPEX_BASE_URL = "https://manav-sharma-yeet--inspex-core-fastapi-app-dev.modal.run"
-API_BASE_URL    = "https://karan-flowerless-glynda.ngrok-free.dev"   # ngrok → localhost:8000
-TEST_IMAGE_PATH = "/Users/manav/Desktop/dev/projects/Sym_Cat/cat_core/data/test/BrokenRimBolt1.jpg"
+GEMINI_API_KEY  = os.getenv("GEMINI_API_KEY", "").strip()
+INSPEX_BASE_URL = os.getenv("INSPEX_BASE_URL", "https://manav-sharma-yeet--inspex-core-fastapi-app-dev.modal.run/")
+INSPEX_INSPECT_URL = os.getenv("INSPEX_INSPECT_URL", "").strip()
+API_BASE_URL    = os.getenv("API_BASE_URL", "http://127.0.0.1:8000")
+TEST_IMAGE_PATH = "cat_core/data/test/BrokenRimBolt1.jpg"
 
 FORMAT            = pyaudio.paInt16
 CHANNELS          = 1
@@ -24,9 +27,244 @@ RECEIVE_SAMPLE_RATE = 24000
 CHUNK_SIZE        = 1024
 
 MODEL = "gemini-2.5-flash-native-audio-preview-12-2025"
+WS_TEXT_MODEL = os.getenv("GEMINI_LIVE_TEXT_MODEL", "gemini-2.5-flash")
+LIVE_WS_HOST = os.getenv("LIVE_WS_HOST", "0.0.0.0")
+LIVE_WS_PORT = int(os.getenv("LIVE_WS_PORT", "8001"))
+LIVE_WS_PATH = os.getenv("LIVE_WS_PATH", "/ws/live-inspection")
 
 client = genai.Client(api_key=GEMINI_API_KEY)
 pya    = pyaudio.PyAudio()
+
+
+async def _post_inspection_request(image_bytes: bytes, voice_text: str, equipment_id: str, equipment_model: str) -> dict:
+    def candidate_urls() -> list[str]:
+        urls: list[str] = []
+        if INSPEX_INSPECT_URL:
+            urls.append(INSPEX_INSPECT_URL)
+        base = INSPEX_BASE_URL.rstrip("/")
+        urls.append(f"{base}/inspect")
+        urls.append(base)
+        # Common FastAPI prefix fallback
+        urls.append(f"{base}/api/inspect")
+        # Deduplicate while preserving order
+        seen = set()
+        unique = []
+        for u in urls:
+            if u and u not in seen:
+                seen.add(u)
+                unique.append(u)
+        return unique
+
+    form = aiohttp.FormData()
+    form.add_field("image", image_bytes, filename="inspection.jpg", content_type="image/jpeg")
+    form.add_field("voice_text", voice_text)
+    form.add_field("equipment_id", equipment_id)
+    form.add_field("equipment_model", equipment_model)
+
+    errors: list[str] = []
+    for url in candidate_urls():
+        try:
+            async with aiohttp.ClientSession() as http:
+                # Recreate form each attempt (FormData is one-shot once streamed).
+                attempt_form = aiohttp.FormData()
+                attempt_form.add_field("image", image_bytes, filename="inspection.jpg", content_type="image/jpeg")
+                attempt_form.add_field("voice_text", voice_text)
+                attempt_form.add_field("equipment_id", equipment_id)
+                attempt_form.add_field("equipment_model", equipment_model)
+
+                async with http.post(
+                    url,
+                    data=attempt_form,
+                    timeout=aiohttp.ClientTimeout(total=180),
+                ) as resp:
+                    body_text = await resp.text()
+                    if resp.status == 200:
+                        try:
+                            return json.loads(body_text)
+                        except Exception:
+                            return {"error": f"Inspect endpoint returned non-JSON success at {url}"}
+                    errors.append(f"{url} -> {resp.status}: {body_text[:120]}")
+                    # Retry other candidates on endpoint-shape mismatch.
+                    if "invalid function call" in body_text.lower() or resp.status in (404, 405):
+                        continue
+                    # For other failures, still continue to next candidate once.
+                    continue
+        except Exception as e:
+            errors.append(f"{url} -> request failed: {e}")
+
+    return {"error": "Inspect endpoint failed. " + " | ".join(errors[:4])}
+
+
+async def inspect_image_bytes(
+    image_bytes: bytes,
+    voice_text: str,
+    equipment_id: str = "CAT-320-002",
+    equipment_model: str = "CAT 320 Excavator",
+) -> dict:
+    """Wrapper for the relay server."""
+    return await _post_inspection_request(image_bytes, voice_text, equipment_id, equipment_model)
+
+
+async def ws_gemini_reply(user_text: str, context: dict) -> str:
+    task_title = str(context.get("task_title") or "").strip()
+    task_description = str(context.get("task_description") or "").strip()
+    prompt = (
+        "You are an AI inspection assistant for CAT heavy equipment. "
+        "Keep responses concise and practical. "
+        "Ground every answer in the current task context.\n"
+        f"inspection_id={context.get('inspection_id', 'unknown')}, "
+        f"task_id={context.get('task_id', 'unknown')}\n"
+        f"task_title={task_title or 'N/A'}\n"
+        f"task_description={task_description or 'N/A'}\n"
+        f"Inspector: {user_text}\n"
+        "Assistant:"
+    )
+    try:
+        resp = await client.aio.models.generate_content(
+            model=WS_TEXT_MODEL,
+            contents=prompt,
+        )
+        text = (resp.text or "").strip()
+        return text or "No response generated."
+    except Exception as e:
+        return f"Gemini reply failed: {e}"
+
+
+def summarize_inspection_for_ws(result: dict) -> str:
+    if not isinstance(result, dict):
+        return "Image analyzed."
+    if result.get("error"):
+        return str(result["error"])
+
+    component = str(result.get("component_identified") or "component")
+    status = str(result.get("overall_status") or "unknown").upper()
+    anomalies = result.get("anomalies") or []
+    if not anomalies:
+        return f"Image analyzed: {component}. Status {status}. No anomalies detected."
+
+    top = anomalies[0] if isinstance(anomalies[0], dict) else {}
+    issue = str(top.get("issue") or "anomaly detected")
+    severity = str(top.get("severity") or "monitor").upper()
+    return f"Image analyzed: {component}. Status {status}. Top finding {severity}: {issue}."
+
+
+def ws_event(event: str, text: str, **extra) -> str:
+    payload = {"event": event, "assistant_text": text}
+    if extra:
+        payload.update(extra)
+    return json.dumps(payload)
+
+
+async def ws_handle_message(websocket, raw: str, context: dict):
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        await websocket.send(ws_event("error", "Invalid JSON message."))
+        return
+
+    message_type = payload.get("type")
+    if message_type == "start":
+        context["inspection_id"] = payload.get("inspection_id")
+        context["task_id"] = payload.get("task_id")
+        context["equipment_id"] = payload.get("equipment_id") or "CAT-320-002"
+        context["equipment_model"] = payload.get("equipment_model") or "CAT 320 Excavator"
+        context["task_title"] = payload.get("task_title") or ""
+        context["task_description"] = payload.get("task_description") or ""
+        context["image_processing"] = False
+        context["last_user_text"] = ""
+        title = str(context["task_title"]).strip()
+        if title:
+            await websocket.send(ws_event("session_started", f"Session started for task: {title}. Talk to AI is active."))
+        else:
+            await websocket.send(ws_event("session_started", "Session started. Talk to AI is active."))
+        return
+
+    if message_type == "user_image":
+        if context.get("image_processing"):
+            await websocket.send(ws_event("image_processing_busy", "Image is already processing. Wait for feedback."))
+            return
+
+        encoded = str(payload.get("image_base64", "")).strip()
+        if not encoded:
+            await websocket.send(ws_event("image_error", "Image payload missing."))
+            return
+        try:
+            image_bytes = base64.b64decode(encoded, validate=True)
+        except Exception:
+            await websocket.send(ws_event("image_error", "Invalid image payload."))
+            return
+        if not image_bytes:
+            await websocket.send(ws_event("image_error", "Image payload is empty."))
+            return
+
+        context["image_processing"] = True
+        await websocket.send(ws_event("image_processing_started", "Image received. Analyzing now."))
+        try:
+            result = await inspect_image_bytes(
+                image_bytes=image_bytes,
+                voice_text=str(payload.get("note", "Captured inspection image")),
+                equipment_id=str(context.get("equipment_id", "CAT-320-002")),
+                equipment_model=str(context.get("equipment_model", "CAT 320 Excavator")),
+            )
+            await websocket.send(ws_event("image_feedback", summarize_inspection_for_ws(result)))
+        finally:
+            context["image_processing"] = False
+        return
+
+    if message_type != "user_transcript":
+        await websocket.send(ws_event("error", f"Unsupported type: {message_type}"))
+        return
+
+    user_text = str(payload.get("text", "")).strip()
+    if not user_text:
+        return
+    if context.get("image_processing"):
+        await websocket.send(ws_event("image_processing_busy", "Image is processing. Wait for analysis before speaking more."))
+        return
+    if user_text == context.get("last_user_text"):
+        return
+    context["last_user_text"] = user_text
+
+    lowered = user_text.lower()
+    if "capture photo" in lowered or "take photo" in lowered or "[capture_photo]" in lowered:
+        await websocket.send("[capture_photo]")
+        return
+
+    reply = await ws_gemini_reply(user_text, context)
+    await websocket.send(ws_event("assistant_reply", reply))
+
+
+async def ws_relay_server():
+    print(f"[WS] starting relay at ws://{LIVE_WS_HOST}:{LIVE_WS_PORT}{LIVE_WS_PATH}")
+
+    async def handler(websocket):
+        req = getattr(websocket, "request", None)
+        path = getattr(req, "path", "")
+        if path != LIVE_WS_PATH:
+            await websocket.close(code=1008, reason=f"Invalid path: {path}")
+            return
+
+        context = {}
+        print("[WS] client connected")
+        await websocket.send(ws_event("relay_connected", "Live relay connected."))
+        try:
+            async for raw in websocket:
+                await ws_handle_message(websocket, raw, context)
+        except websockets.ConnectionClosed:
+            pass
+        finally:
+            print("[WS] client disconnected")
+
+    async with websockets.serve(
+        handler,
+        LIVE_WS_HOST,
+        LIVE_WS_PORT,
+        max_size=8_000_000,
+        ping_interval=20,
+        ping_timeout=20,
+    ):
+        print("[WS] ready")
+        await asyncio.Future()
 
 # ---------------------------------------------------------------------------
 # Tool definitions
@@ -243,37 +481,26 @@ async def call_inspect(args: dict) -> dict:
     print(f"[INSPECT] Sending image: {len(image_bytes):,} bytes")
     print(f"[INSPECT] voice_text: {args.get('voice_text', '')}")
 
-    form = aiohttp.FormData()
-    form.add_field(
-        "image", image_bytes,
-        filename="inspection.jpg",
-        content_type="image/jpeg"
+    # Use the shared robust request function
+    result = await _post_inspection_request(
+        image_bytes=image_bytes,
+        voice_text=args.get("voice_text", ""),
+        equipment_id=args.get("equipment_id", "CAT-320-002"),
+        equipment_model="CAT 320 Excavator"
     )
-    form.add_field("voice_text",     args.get("voice_text", ""))
-    form.add_field("equipment_id",   args.get("equipment_id", "CAT-320-002"))
-    form.add_field("equipment_model","CAT 320 Excavator")
 
-    try:
-        async with aiohttp.ClientSession() as http:
-            async with http.post(
-                f"{INSPEX_BASE_URL}/inspect",
-                data=form,
-                timeout=aiohttp.ClientTimeout(total=180)   # Modal GPU cold-start can be slow
-            ) as resp:
-                result = await resp.json()
+    if result.get("error"):
+        print(f"[ERROR] /inspect call failed: {result['error']}")
+        return result
 
-        print(f"[INSPECT] Response status: {result.get('overall_status')}")
-        print(f"[INSPECT] Anomalies: {len(result.get('anomalies', []))}")
-        print(f"[INSPECT] Parts: {len(result.get('parts', []))}")
+    print(f"[INSPECT] Response status: {result.get('overall_status')}")
+    print(f"[INSPECT] Anomalies: {len(result.get('anomalies', []))}")
+    print(f"[INSPECT] Parts: {len(result.get('parts', []))}")
 
-        # Return trimmed version for Gemini, but stash the full result
-        trimmed = _trim_for_speech(result)
-        trimmed["_full"] = result
-        return trimmed
-
-    except Exception as e:
-        print(f"[ERROR] /inspect call failed: {e}")
-        return {"error": str(e)}
+    # Return trimmed version for Gemini, but stash the full result
+    trimmed = _trim_for_speech(result)
+    trimmed["_full"] = result
+    return trimmed
 
 
 async def call_report_anomalies() -> dict:
@@ -658,7 +885,19 @@ async def run():
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--mode",
+        choices=["terminal", "ws-relay"],
+        default="terminal",
+        help="terminal: local mic test, ws-relay: websocket endpoint for iOS app",
+    )
+    args = parser.parse_args()
+
     try:
-        asyncio.run(run())
+        if args.mode == "ws-relay":
+            asyncio.run(ws_relay_server())
+        else:
+            asyncio.run(run())
     except KeyboardInterrupt:
         print("\nStopped by user.")
