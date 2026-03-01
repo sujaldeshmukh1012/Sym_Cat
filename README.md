@@ -6,6 +6,9 @@
 - **Purpose:** Integrated inspection and inventory application for heavy machinery. Provides a Python backend API, React web UI, SwiftUI iOS inspection app, and analysis/core utilities.
 - **Key features:** inspection data collection, report generation, inventory management, analytics, and integrations with Supabase.
 
+## System Architecture
+![System Architecture](symbiote_archi.png)
+
 ## Repository layout
 - **`api/`** — Python backend, routers, services, report templates and schema.
 - **`Web/`** — React + Vite frontend (pages, components, Supabase integration).
@@ -92,11 +95,11 @@ python -m uvicorn api.main:app --host 127.0.0.1 --port 8000 --reload
 - Describe behavior and test steps in PR descriptions.
 - We used Chatgpt 5.3 Codex that assisted with the majority of UI work.
 
-# Troubleshooting
+## Troubleshooting
 - If backend dependencies fail: recreate the venv and reinstall from `api/requirements.txt`.
 - If frontend can't reach the API: ensure the backend is running and CORS is enabled.
 - For device testing of the iOS app: use a LAN-accessible backend or a tunneling tool (ngrok) so the simulator/device can reach the host.
 
-# Contact & license
+## Contact & license
 - Check repository metadata or open an issue for bugs and feature requests.
 - Confirm license in the repo root or with maintainers if none is present.
