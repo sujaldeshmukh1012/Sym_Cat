@@ -2802,6 +2802,7 @@ private struct FleetInspectionWorkflowView: View {
                 bottomOverlay
             }
         }
+        .ignoresSafeArea(.keyboard, edges: .bottom)
         .onAppear {
             cameraService.start()
             if selectedTaskID == nil {
@@ -3095,6 +3096,7 @@ private struct FleetInspectionWorkflowView: View {
             } else {
                 HStack(spacing: 8) {
                     Button {
+                        dismissKeyboard()
                         guard capturedPhotoFileNames.count < 5 else { return }
                         guard !voiceService.isImageProcessing else { return }
                         cameraService.capturePhoto { filename in
@@ -3118,6 +3120,7 @@ private struct FleetInspectionWorkflowView: View {
                     .opacity((capturedPhotoFileNames.count >= 5 || isTaskSyncing || voiceService.isImageProcessing) ? 0.5 : 1.0)
 
                     Button {
+                        dismissKeyboard()
                         if voiceService.isLiveListening {
                             voiceService.stopLiveListening()
                             liveVoiceStatus = "Live AI stopped."
@@ -3198,6 +3201,7 @@ private struct FleetInspectionWorkflowView: View {
                     .pickerStyle(.segmented)
 
                     Button {
+                        dismissKeyboard()
                         submitCurrentTaskButtonFlow(task)
                     } label: {
                         HStack(spacing: 8) {
@@ -3227,6 +3231,7 @@ private struct FleetInspectionWorkflowView: View {
     }
 
     private func submitCurrentTaskButtonFlow(_ task: FleetTaskRecord) {
+        dismissKeyboard()
         isTaskSyncing = true
         voiceService.stopLiveListening()
         Task {
@@ -3289,6 +3294,7 @@ private struct FleetInspectionWorkflowView: View {
     }
 
     private func beginLiveAI(for taskID: UUID) {
+        dismissKeyboard()
         let task = record?.tasks.first(where: { $0.id == taskID })
         liveVoiceStatus = "Connecting live AI..."
         liveUserSnippet = ""
@@ -3301,6 +3307,7 @@ private struct FleetInspectionWorkflowView: View {
         ) { [self] command in
             switch command {
             case .capturePhoto:
+                dismissKeyboard()
                 guard capturedPhotoFileNames.count < 5 else { return }
                 guard !voiceService.isImageProcessing else { return }
                 cameraService.capturePhoto { filename in
@@ -3313,6 +3320,7 @@ private struct FleetInspectionWorkflowView: View {
                     )
                 }
             case .capturePhotoWithContext(let context):
+                dismissKeyboard()
                 guard capturedPhotoFileNames.count < 5 else { return }
                 guard !voiceService.isImageProcessing else { return }
                 cameraService.capturePhoto { filename in
@@ -3335,6 +3343,9 @@ private struct FleetInspectionWorkflowView: View {
                     liveAISentence = ""
                 }
                 updateLiveUserSnippet(text)
+            case .transcriptChunk(let chunk):
+                appendTranscribedFeedback(chunk)
+                liveVoiceStatus = "Transcribing..."
             case .imageFeedback(let text):
                 liveVoiceStatus = "Image analysis received."
                 appendFeedbackBullet(text)
@@ -3347,6 +3358,7 @@ private struct FleetInspectionWorkflowView: View {
 
     /// Voice-triggered task submission — same logic as "Send Feedback" button
     private func submitCurrentTask() {
+        dismissKeyboard()
         guard let task = currentTask, !isTaskSyncing else { return }
         isTaskSyncing = true
         voiceService.stopLiveListening()
@@ -3445,6 +3457,25 @@ private func appendFeedbackBullet(_ value: String) {
             }
         }
         return text
+    }
+
+    private func appendTranscribedFeedback(_ chunk: String) {
+        let normalized = chunk
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return }
+
+        if feedbackText.isEmpty {
+            feedbackText = normalized
+            return
+        }
+
+        let needsSpace = !feedbackText.hasSuffix(" ")
+        feedbackText += needsSpace ? " \(normalized)" : normalized
+    }
+
+    private func dismissKeyboard() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
 }
 
@@ -3591,6 +3622,14 @@ private final class FleetCameraService: NSObject, ObservableObject, @preconcurre
 
     func capturePhoto(completion: @escaping (String?) -> Void) {
         self.completion = completion
+        if !session.isRunning {
+            session.startRunning()
+        }
+        guard output.connection(with: .video) != nil else {
+            completion(nil)
+            self.completion = nil
+            return
+        }
         let settings = AVCapturePhotoSettings()
         output.capturePhoto(with: settings, delegate: self)
     }

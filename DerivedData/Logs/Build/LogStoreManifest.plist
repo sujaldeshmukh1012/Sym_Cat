@@ -5,6 +5,91 @@
 	<key>logFormatVersion</key>
 	<integer>11</integer>
 	<key>logs</key>
-	<dict/>
+	<dict>
+		<key>226BE83D-C3B6-438A-AD78-03D4FEBF8691</key>
+		<dict>
+			<key>className</key>
+			<string>IDECommandLineBuildLog</string>
+			<key>documentTypeString</key>
+			<string>&lt;nil&gt;</string>
+			<key>domainType</key>
+			<string>Xcode.IDEActivityLogDomainType.BuildLog</string>
+			<key>fileName</key>
+			<string>226BE83D-C3B6-438A-AD78-03D4FEBF8691.xcactivitylog</string>
+			<key>hasPrimaryLog</key>
+			<true/>
+			<key>primaryObservable</key>
+			<dict>
+				<key>highLevelStatus</key>
+				<string>E</string>
+				<key>totalNumberOfAnalyzerIssues</key>
+				<integer>0</integer>
+				<key>totalNumberOfErrors</key>
+				<integer>1</integer>
+				<key>totalNumberOfTestFailures</key>
+				<integer>0</integer>
+				<key>totalNumberOfWarnings</key>
+				<integer>3</integer>
+			</dict>
+			<key>schemeIdentifier-containerName</key>
+			<string>CAT Inspect project</string>
+			<key>schemeIdentifier-schemeName</key>
+			<string>CAT Inspect</string>
+			<key>schemeIdentifier-sharedScheme</key>
+			<integer>1</integer>
+			<key>signature</key>
+			<string>Building project CAT Inspect with scheme CAT Inspect and configuration Debug</string>
+			<key>timeStartedRecording</key>
+			<real>794037996.76256704</real>
+			<key>timeStoppedRecording</key>
+			<real>794038002.16570103</real>
+			<key>title</key>
+			<string>Building project CAT Inspect with scheme CAT Inspect and configuration Debug</string>
+			<key>uniqueIdentifier</key>
+			<string>226BE83D-C3B6-438A-AD78-03D4FEBF8691</string>
+		</dict>
+		<key>7589A14E-1A3E-41E0-86FC-1D349A1A212E</key>
+		<dict>
+			<key>className</key>
+			<string>IDECommandLineBuildLog</string>
+			<key>documentTypeString</key>
+			<string>&lt;nil&gt;</string>
+			<key>domainType</key>
+			<string>Xcode.IDEActivityLogDomainType.BuildLog</string>
+			<key>fileName</key>
+			<string>7589A14E-1A3E-41E0-86FC-1D349A1A212E.xcactivitylog</string>
+			<key>hasPrimaryLog</key>
+			<true/>
+			<key>primaryObservable</key>
+			<dict>
+				<key>highLevelStatus</key>
+				<string>E</string>
+				<key>totalNumberOfAnalyzerIssues</key>
+				<integer>0</integer>
+				<key>totalNumberOfErrors</key>
+				<integer>1</integer>
+				<key>totalNumberOfTestFailures</key>
+				<integer>0</integer>
+				<key>totalNumberOfWarnings</key>
+				<integer>3</integer>
+			</dict>
+			<key>schemeIdentifier-containerName</key>
+			<string>CAT Inspect project</string>
+			<key>schemeIdentifier-schemeName</key>
+			<string>CAT Inspect</string>
+			<key>schemeIdentifier-sharedScheme</key>
+			<integer>1</integer>
+			<key>signature</key>
+			<string>Building project CAT Inspect with scheme CAT Inspect and configuration Debug</string>
+			<key>timeStartedRecording</key>
+			<real>794037686.02827799</real>
+			<key>timeStoppedRecording</key>
+			<real>794037691.78496206</real>
+			<key>title</key>
+			<string>Building project CAT Inspect with scheme CAT Inspect and configuration Debug</string>
+			<key>uniqueIdentifier</key>
+			<string>7589A14E-1A3E-41E0-86FC-1D349A1A212E</string>
+		</dict>
+	</dict>
 </dict>
 </plist>

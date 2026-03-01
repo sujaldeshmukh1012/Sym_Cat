@@ -25,6 +25,7 @@ final class AudioModalCaller: NSObject, ObservableObject {
         case capturePhotoWithContext(String)
         case assistantText(String)
         case userText(String)
+        case transcriptChunk(String)
         case imageFeedback(String)
         case submitTask
     }
@@ -84,6 +85,7 @@ final class AudioModalCaller: NSObject, ObservableObject {
     private let speechRecognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     private var recognitionTask: SFSpeechRecognitionTask?
+    private var lastSTTTranscript = ""
 
     // ── Session context ──────────────────────────────────────────────────────
     private var taskContextTitle       = ""
@@ -129,6 +131,7 @@ final class AudioModalCaller: NSObject, ObservableObject {
         stopLiveListening()
 
         liveSessionKey         = key
+        lastSTTTranscript = ""
         commandHandler = { cmd in
             DispatchQueue.main.async { onCommand(cmd) }
         }
@@ -166,6 +169,7 @@ final class AudioModalCaller: NSObject, ObservableObject {
         recognitionTask = nil
         recognitionRequest?.endAudio()
         recognitionRequest = nil
+        lastSTTTranscript = ""
 
         // Audio engine
         if audioEngine.isRunning {
@@ -400,8 +404,25 @@ final class AudioModalCaller: NSObject, ObservableObject {
                 guard let self else { return }
                 if let result {
                     let text = result.bestTranscription.formattedString
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !text.isEmpty else { return }
+
+                    var delta = ""
+                    if text.hasPrefix(self.lastSTTTranscript) {
+                        delta = String(text.dropFirst(self.lastSTTTranscript.count))
+                    } else if self.lastSTTTranscript.isEmpty {
+                        delta = text
+                    } else if text.count > self.lastSTTTranscript.count {
+                        delta = String(text.suffix(text.count - self.lastSTTTranscript.count))
+                    }
+                    self.lastSTTTranscript = text
+
                     DispatchQueue.main.async {
                         self.commandHandler?(.userText(String(text.suffix(120))))
+                        let normalizedDelta = delta.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !normalizedDelta.isEmpty {
+                            self.commandHandler?(.transcriptChunk(delta))
+                        }
                     }
                 }
                 if let error {
@@ -567,13 +588,13 @@ final class AudioModalCaller: NSObject, ObservableObject {
                     // Text
                     if let text = part["text"] as? String {
                         currentTurnTextBuffer += text
-                        parseTextCommands()
+                        parseTextCommands(isFinal: false)
                     }
                 }
             }
 
             // turnComplete
-            if content["turnComplete"] != nil {
+            if let turnComplete = content["turnComplete"] as? Bool, turnComplete {
                 geminiTurnComplete = true
 
                 // FIX: If Gemini responded with text only (no audio), we must
@@ -583,6 +604,9 @@ final class AudioModalCaller: NSObject, ObservableObject {
                 } else {
                     scheduleUnmuteIfReady()
                 }
+
+                // Final parse sweep of any dangling text
+                parseTextCommands(isFinal: true)
 
                 currentTurnTextBuffer = ""
                 dispatchedTagsThisTurn.removeAll()
@@ -618,7 +642,7 @@ final class AudioModalCaller: NSObject, ObservableObject {
     // MARK: Parse text action tags
     // ─────────────────────────────────────────────────────────────────────────
 
-    private func parseTextCommands() {
+    private func parseTextCommands(isFinal: Bool = false) {
         // FIX: Use dispatchedTagsThisTurn to prevent duplicate commands when
         // parseTextCommands is called repeatedly on partial text chunks.
 
@@ -632,44 +656,79 @@ final class AudioModalCaller: NSObject, ObservableObject {
 
         // [capture_photo: <context>]  or  [capture_photo]
         if !dispatchedTagsThisTurn.contains("capture_photo") {
-            if let range = currentTurnTextBuffer.range(
-                of: "\\[capture_photo:\\s*([^\\]]+)\\]",
-                options: [.regularExpression, .caseInsensitive]
-            ) {
-                dispatchedTagsThisTurn.insert("capture_photo")
-                let match   = String(currentTurnTextBuffer[range])
-                let context = extractTagValue(from: match)
-                if context.isEmpty {
-                    commandHandler?(.capturePhoto)
-                } else {
-                    commandHandler?(.capturePhotoWithContext(context))
+            let lowerBuffer = currentTurnTextBuffer.lowercased()
+            if let range = lowerBuffer.range(of: "capture_photo:") {
+                let startIndex = currentTurnTextBuffer.index(currentTurnTextBuffer.startIndex, offsetBy: range.upperBound.utf16Offset(in: lowerBuffer))
+                var context = String(currentTurnTextBuffer[startIndex...])
+                let hasClosingBracket = context.contains("]")
+                
+                if hasClosingBracket || isFinal {
+                    dispatchedTagsThisTurn.insert("capture_photo")
+                    if let closeIdx = context.firstIndex(of: "]") {
+                        context = String(context[..<closeIdx])
+                    }
+                    context = context.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if context.isEmpty {
+                        commandHandler?(.capturePhoto)
+                    } else {
+                        commandHandler?(.capturePhotoWithContext(context))
+                    }
                 }
-            } else if currentTurnTextBuffer.range(
-                of: "\\[capture_photo\\]",
-                options: [.regularExpression, .caseInsensitive]
-            ) != nil {
+            } else if lowerBuffer.contains("capture_photo") {
                 dispatchedTagsThisTurn.insert("capture_photo")
                 commandHandler?(.capturePhoto)
             }
         }
 
         // [image_feedback: <bullets>]
-        if !dispatchedTagsThisTurn.contains("image_feedback"),
-           let range = currentTurnTextBuffer.range(
-               of: "\\[image_feedback:\\s*([^\\]]+)\\]",
-               options: [.regularExpression, .caseInsensitive]
-           ) {
-            dispatchedTagsThisTurn.insert("image_feedback")
-            let match    = String(currentTurnTextBuffer[range])
-            let feedback = extractTagValue(from: match)
-            if !feedback.isEmpty {
-                commandHandler?(.imageFeedback(feedback))
+        if !dispatchedTagsThisTurn.contains("image_feedback") {
+            let lowerBuffer = currentTurnTextBuffer.lowercased()
+            if let range = lowerBuffer.range(of: "image_feedback:") {
+                // Extract everything after the colon
+                let startIndex = currentTurnTextBuffer.index(currentTurnTextBuffer.startIndex, offsetBy: range.upperBound.utf16Offset(in: lowerBuffer))
+                var feedback = String(currentTurnTextBuffer[startIndex...])
+                let hasClosingBracket = feedback.contains("]")
+                
+                // Only process if we've seen the closing bracket or the stream is officially finished
+                if hasClosingBracket || isFinal {
+                    dispatchedTagsThisTurn.insert("image_feedback")
+                    if let closeIdx = feedback.firstIndex(of: "]") {
+                        feedback = String(feedback[..<closeIdx])
+                    }
+                    feedback = feedback.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !feedback.isEmpty {
+                        commandHandler?(.imageFeedback(feedback))
+                    }
+                }
             }
         }
 
         // Strip all dispatched tags from buffer so they don't pollute
         // the assistantText output, then emit any remaining plain text.
         var cleaned = currentTurnTextBuffer
+        
+        let lowerClean = cleaned.lowercased()
+        if let idx = lowerClean.range(of: "image_feedback:") {
+            if let openIdx = cleaned[..<idx.lowerBound].lastIndex(of: "[") {
+                cleaned = String(cleaned[..<openIdx])
+            } else {
+                cleaned = String(cleaned[..<idx.lowerBound])
+            }
+        } else if let idx = lowerClean.range(of: "capture_photo") {
+            if let openIdx = cleaned[..<idx.lowerBound].lastIndex(of: "[") {
+                cleaned = String(cleaned[..<openIdx])
+            } else {
+                cleaned = String(cleaned[..<idx.lowerBound])
+            }
+        } else if let idx = lowerClean.range(of: "submit_task") {
+            if let openIdx = cleaned[..<idx.lowerBound].lastIndex(of: "[") {
+                cleaned = String(cleaned[..<openIdx])
+            } else {
+                cleaned = String(cleaned[..<idx.lowerBound])
+            }
+        }
+        
+        // Final fallback regex strip
         let tagPatterns = [
             "\\[submit_task\\]",
             "\\[capture_photo:[^\\]]*\\]",
@@ -682,6 +741,7 @@ final class AudioModalCaller: NSObject, ObservableObject {
                 options: [.regularExpression, .caseInsensitive]
             )
         }
+        
         let trimmed = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty {
             commandHandler?(.assistantText(trimmed))
