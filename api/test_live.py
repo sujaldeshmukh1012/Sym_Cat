@@ -16,7 +16,7 @@ load_dotenv() # Load from .env file
 # Config
 # ---------------------------------------------------------------------------
 GEMINI_API_KEY  = os.environ.get("GEMINI_API_KEY")
-INSPEX_BASE_URL = "https://manav-sharma-yeet--inspex-core-fastapi-app-dev.modal.run"
+INSPEX_BASE_URL = "https://manav-sharma-yeet--inspex-core-fastapi-app.modal.run"
 API_BASE_URL    = "http://localhost:8000"   # local FastAPI server
 TEST_IMAGE_PATH = "C:/Users/priti/Downloads/Sym_Cat/symbiote_core/data/test/BrokenRimBolt1.jpg"
 
@@ -33,19 +33,21 @@ You are a highly skilled CAT Equipment Maintenance AI Assistant.
 Your goal is to help service technicians perform inspections and analyze equipment health.
 
 1. **Inspection and Reporting**:
-- After `run_inspection`, read the anomalies to the user (e.g. 'I found 2 issues: high rust on rim bolts...').
-- Ask if they want to report these findings.
-- If they want to change something, use `edit_findings`.
-- Once confirmed, call `report_anomalies`.
+- After `run_inspection`, read the anomalies (e.g. 'I found 2 issues: high rust on rim bolts...').
+- Ask if they want to report these findings. Use `edit_findings` for corrections.
 
-2. **Predictive Health**:
-- When the user asks about fleet health or component failure, use `predict_fleet_health` or `predict_component_health`.
-- Explain the data trends and provide a clear recommendation (e.g. 'The hydraulic pump shows a 85% probability of failure within 100 hours. I recommend immediate replacement.').
+2. **Acoustic Diagnostics**:
+- If the user says "listen to this" or "check this noise", call `analyze_noise`. 
+- Hold for 3 seconds while you "listen", then explain the spectral results (e.g. 'I detect high-frequency grinding consistent with bearing failure.').
 
-3. **Inventory & Parts**:
-- Finally, ask if they want to check inventory or order parts using `order_parts`.
+3. **Predictive Health**:
+- When asked about fleet health or component failure, use `predict_fleet_health` or `predict_component_health`.
+- Provide clear recommendations (e.g. '85% probability of failure within 100 hours. Replace immediately.').
 
-Keep your verbal responses concise and professional. Use engineering terminology (e.g. 'pitting', 'grouser wear', 'hydraulic seepage').
+4. **Inventory & Parts**:
+- Ask if they want to check inventory or order parts using `order_parts`.
+
+Keep your verbal responses concise and professional. Use engineering terminology (e.g. 'pitting', 'grouser wear', 'spectral centroid').
 """
 
 client = genai.Client(api_key=GEMINI_API_KEY, http_options={'api_version': 'v1alpha'})
@@ -152,8 +154,8 @@ TOOLS = [
         types.FunctionDeclaration(
             name="predict_component_health",
             description=(
-                "Predict when a specific component will fail based on historical trends. "
-                "Returns days to critical failure. Use when asked 'when will this part break?'."
+                "Project the number of days until a specific component on a specific "
+                "machine is likely to fail. Use when asked 'when will this break?'."
             ),
             parameters=types.Schema(
                 type="OBJECT",
@@ -164,10 +166,29 @@ TOOLS = [
                     ),
                     "component": types.Schema(
                         type="STRING",
-                        description="Component name e.g. Engine, Hydraulics, Tires"
+                        description="Component name e.g. Engine, Hydraulics"
                     ),
                 },
                 required=["equipment_id", "component"],
+            ),
+        ),
+        
+        types.FunctionDeclaration(
+            name="analyze_noise",
+            description=(
+                "Listen to the equipment noise and analyze it for acoustic faults "
+                "like knocking, grinding, or cavitation. Call this when the user says "
+                "'listen to this' or asks about a specific noise."
+            ),
+            parameters=types.Schema(
+                type="OBJECT",
+                properties={
+                    "equipment_id": types.Schema(
+                        type="STRING",
+                        description="Equipment ID e.g. CAT-320-002"
+                    ),
+                },
+                required=["equipment_id"],
             ),
         ),
 
@@ -220,18 +241,16 @@ async def execute_tool(name: str, args: dict) -> dict:
     elif name == "edit_findings":
         return edit_findings_in_memory(args)
 
-    elif name == "predict_fleet_health":
-        eq_id = args.get("equipment_id")
-        if not isinstance(eq_id, str):
-            return {"error": "equipment_id must be a string"}
-        return await call_fleet_health(eq_id)
-
     elif name == "predict_component_health":
         eq_id = args.get("equipment_id")
         comp = args.get("component")
         if not isinstance(eq_id, str) or not isinstance(comp, str):
             return {"error": "equipment_id and component must be strings"}
         return await call_predict_component(eq_id, comp)
+
+    elif name == "analyze_noise":
+        eq_id = args.get("equipment_id", "CAT-320-002")
+        return await call_analyze_noise(eq_id)
 
     return {"error": f"Unknown tool: {name}"}
 
@@ -355,6 +374,64 @@ async def call_predict_component(equipment_id: str, component: str) -> dict:
             if resp.status != 200:
                 return {"error": f"Prediction API error: {resp.status}"}
             return await resp.json()
+
+
+async def call_analyze_noise(equipment_id: str) -> dict:
+    """Capture 3 seconds of audio from the queue and send to Modal for analysis."""
+    print(f"[ACOUSTIC] Listening to {equipment_id} for 3 seconds...")
+    
+    audio_chunks = []
+    start_time = asyncio.get_event_loop().time()
+    
+    # Capture 3 seconds of audio
+    while asyncio.get_event_loop().time() - start_time < 3.0:
+        try:
+            # Drain from the same queue Gemini uses
+            chunk_data = await asyncio.wait_for(audio_input_queue.get(), timeout=0.1)
+            audio_chunks.append(chunk_data["data"])
+        except asyncio.TimeoutError:
+            continue
+
+    if not audio_chunks:
+        return {"error": "No audio captured"}
+
+    full_audio = b"".join(audio_chunks)
+    print(f"[ACOUSTIC] Captured {len(full_audio):,} bytes. Sending to Modal...")
+
+    # Convert PCM to WAV in memory so librosa can read it easily
+    import wave
+    import io
+    
+    wav_io = io.BytesIO()
+    with wave.open(wav_io, 'wb') as wav_file:
+        wav_file.setnchannels(CHANNELS)
+        wav_file.setsampwidth(pya.get_sample_size(FORMAT))
+        wav_file.setframerate(SEND_SAMPLE_RATE)
+        wav_file.writeframes(full_audio)
+    
+    wav_bytes = wav_io.getvalue()
+
+    form = aiohttp.FormData()
+    form.add_field(
+        "audio", wav_bytes,
+        filename="noise_sample.wav",
+        content_type="audio/wav"
+    )
+    form.add_field("equipment_id", equipment_id)
+
+    try:
+        async with aiohttp.ClientSession() as http:
+            async with http.post(
+                f"{INSPEX_BASE_URL}/analyze-sound",
+                data=form,
+                timeout=aiohttp.ClientTimeout(total=30)
+            ) as resp:
+                if resp.status != 200:
+                    text = await resp.text()
+                    return {"error": f"Acoustic API error {resp.status}: {text}"}
+                return await resp.json()
+    except Exception as e:
+        return {"error": f"Failed to call acoustic API: {str(e)}"}
 
 
 async def call_report_anomalies() -> dict:

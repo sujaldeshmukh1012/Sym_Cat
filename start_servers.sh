@@ -16,10 +16,14 @@ python -m api.main &
 API_PID=$!
 deactivate
 
-# Start Modal Server (symbiote_core/)
-echo "Starting Modal Symbiote Server..."
+# Deploy Modal Audio API
+echo "Deploying Modal Audio API..."
+./start_audio_server.sh
+
+# Start Modal Server (symbiote_core/) for interactive development
+echo "Starting Modal Symbiote Server (serve mode)..."
 cd symbiote_core
-source .venv/bin/activate
+# Note: modal deploy was done in the previous step, modal serve is for hot-reloading
 modal serve main.py
 
 # When Modal serve is stopped (Ctrl+C), kill the background API

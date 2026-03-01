@@ -19,12 +19,14 @@ from PIL import Image
 from analyzer import Inspector, app
 from inventory import check_parts
 from router import Router
+from acoustic import SoundAnalyzer
 
 # Lightweight image for the web endpoint (GPU + model live in analyzer.Inspector)
 web_image = (
     modal.Image.debian_slim(python_version="3.11")
-    .pip_install("fastapi", "uvicorn[standard]", "python-multipart", "pillow")
-    .add_local_python_source("analyzer", "router", "inventory", "logger", "db", "prompts")
+    .apt_install("libsndfile1")
+    .pip_install("fastapi", "uvicorn[standard]", "python-multipart", "pillow", "librosa", "scipy", "soundfile")
+    .add_local_python_source("analyzer", "router", "inventory", "logger", "db", "prompts", "acoustic")
 )
 
 api = FastAPI(title="CAT Inspect Core", description="AI-powered equipment inspection")
@@ -195,6 +197,27 @@ async def inspect(
     result["component_identified"] = result.get("component_identified") or component
     result["component_route"] = component
 
+    return result
+
+
+@api.post("/analyze-sound")
+async def analyze_sound(
+    audio: UploadFile = File(...),
+    equipment_id: str = Form(""),
+):
+    """
+    Industry-standard acoustic fault detection.
+    Analyzes sound signatures (knocking, grinding, vibration) using spectral features.
+    """
+    audio_bytes = await audio.read()
+    analyzer = SoundAnalyzer()
+    result = analyzer.analyze(audio_bytes)
+    
+    if "error" in result:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=500, detail=result["error"])
+        
+    result["equipment_id"] = equipment_id
     return result
 
 
