@@ -24,9 +24,11 @@ final class AudioModalCaller: NSObject, ObservableObject {
         case capturePhoto
         case capturePhotoWithContext(String)
         case assistantText(String)
+        case assistantAudioText(String)
         case userText(String)
-        case transcriptChunk(String)
+        case finalUserText(String)
         case imageFeedback(String)
+        case soundAnomaly(String)
         case submitTask
     }
 
@@ -50,6 +52,7 @@ final class AudioModalCaller: NSObject, ObservableObject {
     private var websocketTask: URLSessionWebSocketTask?
     private var setupAcknowledged = false
     private var currentTurnTextBuffer = ""
+    private var lastServerOutputTranscript = ""
 
     // FIX: Track which tag types have already been dispatched in the current
     // turn to prevent duplicate commands from partial-chunk processing.
@@ -85,7 +88,6 @@ final class AudioModalCaller: NSObject, ObservableObject {
     private let speechRecognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     private var recognitionTask: SFSpeechRecognitionTask?
-    private var lastSTTTranscript = ""
 
     // ── Session context ──────────────────────────────────────────────────────
     private var taskContextTitle       = ""
@@ -103,6 +105,15 @@ final class AudioModalCaller: NSObject, ObservableObject {
     private var wsSendQueue: [String] = []
     private var wsSendInFlight = false
     private let wsSendQueueMax = 60   // FIX: cap to prevent unbounded growth
+
+    // ── Acoustic Analysis (Modal API) ────────────────────────────────────────
+    private static let acousticAnalysisURL = "https://manav-sharma-yeet--inspex-core-fastapi-app.modal.run/analyze-sound"
+    private var acousticPCMBuffer = Data()           // accumulates 16 kHz Int16 PCM
+    private let acousticSampleRate: Int = 16000
+    private let acousticAnalysisIntervalSec: Double = 4.0
+    private var acousticAnalysisTimer: DispatchWorkItem?
+    private var isAcousticAnalysisInFlight = false
+    private var acousticAnalysisCount = 0
 
     // ─────────────────────────────────────────────────────────────────────────
     // MARK: Init
@@ -131,7 +142,6 @@ final class AudioModalCaller: NSObject, ObservableObject {
         stopLiveListening()
 
         liveSessionKey         = key
-        lastSTTTranscript = ""
         commandHandler = { cmd in
             DispatchQueue.main.async { onCommand(cmd) }
         }
@@ -163,13 +173,14 @@ final class AudioModalCaller: NSObject, ObservableObject {
 
     func stopLiveListening() {
         print("[CatAI] stopLiveListening")
+        print("[CATLive] stopLiveListening")
 
         // STT
         recognitionTask?.cancel()
         recognitionTask = nil
         recognitionRequest?.endAudio()
         recognitionRequest = nil
-        lastSTTTranscript = ""
+        lastServerOutputTranscript = ""
 
         // Audio engine
         if audioEngine.isRunning {
@@ -187,6 +198,13 @@ final class AudioModalCaller: NSObject, ObservableObject {
         wsSendQueue.removeAll()
         wsSendInFlight = false
         commandHandler = nil
+
+        // Acoustic analysis
+        acousticAnalysisTimer?.cancel()
+        acousticAnalysisTimer = nil
+        acousticPCMBuffer = Data()
+        isAcousticAnalysisInFlight = false
+        acousticAnalysisCount = 0
 
         // Reset state
         currentTurnTextBuffer = ""
@@ -210,6 +228,7 @@ final class AudioModalCaller: NSObject, ObservableObject {
         // that would break the live pipeline.
         guard !isLiveListening else {
             print("[CatAI] startRecording ignored: live session is active")
+            print("[CATLive] startRecording ignored: live session is active")
             return
         }
         let session = AVAudioSession.sharedInstance()
@@ -239,10 +258,12 @@ final class AudioModalCaller: NSObject, ObservableObject {
         // FIX: Guard both isLiveListening AND websocketTask existence
         guard isLiveListening, websocketTask != nil else {
             print("[CatAI] sendCapturedImageToWebSocket: no active session")
+            print("[CATLive] sendCapturedImageToWebSocket: no active session")
             return
         }
         guard !isImageProcessing else {
             print("[CatAI] sendCapturedImageToWebSocket: image already processing")
+            print("[CATLive] sendCapturedImageToWebSocket: image already processing")
             return
         }
         isImageProcessing = true
@@ -255,6 +276,7 @@ final class AudioModalCaller: NSObject, ObservableObject {
             guard let base64 = Self.prepareImageBase64(imageURL: imageURL) else {
                 await MainActor.run { self.isImageProcessing = false }
                 print("[CatAI] sendCapturedImageToWebSocket: failed to encode image")
+                print("[CATLive] sendCapturedImageToWebSocket: failed to encode image")
                 return
             }
             let payload: [String: Any] = [
@@ -291,9 +313,11 @@ final class AudioModalCaller: NSObject, ObservableObject {
             )
             try session.setActive(true, options: .notifyOthersOnDeactivation)
             print("[CatAI] ✅ Audio session configured")
+            print("[CATLive] ✅ Audio session configured")
             return true
         } catch {
             print("[CatAI] ❌ Audio session error: \(error)")
+            print("[CATLive] ❌ Audio session error: \(error)")
             commandHandler?(.assistantText("Audio session error: \(error.localizedDescription)"))
             return false
         }
@@ -307,16 +331,19 @@ final class AudioModalCaller: NSObject, ObservableObject {
         let inputNode = audioEngine.inputNode
         let hwFormat  = inputNode.outputFormat(forBus: 0)
         print("[CatAI] Mic hardware format: \(hwFormat)")
+        print("[CATLive] Mic hardware format: \(hwFormat)")
 
         // FIX: Guard against zero sample rate which would crash AVAudioConverter
         guard hwFormat.sampleRate > 0 else {
             print("[CatAI] ❌ Invalid hardware format — sample rate is 0")
+            print("[CATLive] ❌ Invalid hardware format — sample rate is 0")
             commandHandler?(.assistantText("Audio hardware unavailable."))
             return
         }
 
         guard let converter = AVAudioConverter(from: hwFormat, to: sendFormat) else {
             print("[CatAI] ❌ Failed to create AVAudioConverter")
+            print("[CATLive] ❌ Failed to create AVAudioConverter")
             commandHandler?(.assistantText("Audio conversion unavailable."))
             return
         }
@@ -373,6 +400,12 @@ final class AudioModalCaller: NSObject, ObservableObject {
             let pcmData   = Data(bytes: converted.int16ChannelData![0], count: byteCount)
             let base64    = pcmData.base64EncodedString()
 
+            // Accumulate PCM for acoustic analysis
+            DispatchQueue.main.async { [weak self] in
+                self?.acousticPCMBuffer.append(pcmData)
+                self?.scheduleAcousticAnalysisIfNeeded()
+            }
+
             let payload: [String: Any] = [
                 "realtimeInput": [
                     "mediaChunks": [
@@ -395,6 +428,7 @@ final class AudioModalCaller: NSObject, ObservableObject {
             print("[CatAI] ✅ Audio engine started")
         } catch {
             print("[CatAI] ❌ Audio engine start failed: \(error)")
+            print("[CATLive] ❌ Audio engine start failed: \(error)")
             commandHandler?(.assistantText("Audio engine failed: \(error.localizedDescription)"))
         }
 
@@ -404,25 +438,8 @@ final class AudioModalCaller: NSObject, ObservableObject {
                 guard let self else { return }
                 if let result {
                     let text = result.bestTranscription.formattedString
-                        .trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard !text.isEmpty else { return }
-
-                    var delta = ""
-                    if text.hasPrefix(self.lastSTTTranscript) {
-                        delta = String(text.dropFirst(self.lastSTTTranscript.count))
-                    } else if self.lastSTTTranscript.isEmpty {
-                        delta = text
-                    } else if text.count > self.lastSTTTranscript.count {
-                        delta = String(text.suffix(text.count - self.lastSTTTranscript.count))
-                    }
-                    self.lastSTTTranscript = text
-
                     DispatchQueue.main.async {
                         self.commandHandler?(.userText(String(text.suffix(120))))
-                        let normalizedDelta = delta.trimmingCharacters(in: .whitespacesAndNewlines)
-                        if !normalizedDelta.isEmpty {
-                            self.commandHandler?(.transcriptChunk(delta))
-                        }
                     }
                 }
                 if let error {
@@ -430,6 +447,7 @@ final class AudioModalCaller: NSObject, ObservableObject {
                 }
             }
         }
+
     }
 
     /// Decode Cat AI 24 kHz PCM audio and schedule on playerNode.
@@ -497,6 +515,7 @@ final class AudioModalCaller: NSObject, ObservableObject {
                         ]
                     ]
                 ],
+                "outputAudioTranscription": [:],
                 "systemInstruction": [
                     "parts": [["text": systemText]]
                 ]
@@ -510,14 +529,17 @@ final class AudioModalCaller: NSObject, ObservableObject {
         }
 
         print("[CatAI] Sending setup (\(str.count) chars)")
+        print("[CATLive] Sending setup (\(str.count) chars)")
         websocketTask?.send(.string(str)) { [weak self] error in
             if let error {
                 print("[CatAI] ❌ Setup send failed: \(error)")
+                print("[CATLive] ❌ Setup send failed: \(error)")
                 DispatchQueue.main.async {
                     self?.commandHandler?(.assistantText("Connection failed: \(error.localizedDescription)"))
                 }
             } else {
                 print("[CatAI] ✅ Setup sent, waiting for setupComplete…")
+                print("[CATLive] ✅ Setup sent, waiting for setupComplete…")
             }
         }
         receiveMessages()
@@ -532,6 +554,7 @@ final class AudioModalCaller: NSObject, ObservableObject {
                     // FIX: Don't report errors after intentional teardown
                     guard self.websocketTask != nil else { return }
                     print("[CatAI] ❌ WS receive error: \(error)")
+                    print("[CATLive] ❌ WS receive error: \(error)")
                     self.commandHandler?(.assistantText("Connection dropped."))
 
                 case .success(let msg):
@@ -555,12 +578,14 @@ final class AudioModalCaller: NSObject, ObservableObject {
         guard let data = raw.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             print("[CatAI] ⚠️ Unparseable server message")
+            print("[CATLive] ⚠️ Unparseable server message")
             return
         }
 
         // setupComplete → start audio pipeline
         if json["setupComplete"] != nil {
             print("[CatAI] ✅ setupComplete — starting audio pipeline")
+            print("[CATLive] ✅ setupComplete — starting audio pipeline")
             setupAcknowledged = true
             isLiveListening = true
             startAudioPipeline()
@@ -571,6 +596,14 @@ final class AudioModalCaller: NSObject, ObservableObject {
         // serverContent
         if let content = json["serverContent"] as? [String: Any] {
             isImageProcessing = false
+
+            if let outputTx = content["outputTranscription"] as? [String: Any],
+               let txText = outputTx["text"] as? String {
+                let delta = deltaFromServerOutputTranscript(txText)
+                if !delta.isEmpty {
+                    commandHandler?(.assistantAudioText(delta))
+                }
+            }
 
             if let turn = content["modelTurn"] as? [String: Any],
                let parts = turn["parts"] as? [[String: Any]] {
@@ -610,12 +643,14 @@ final class AudioModalCaller: NSObject, ObservableObject {
 
                 currentTurnTextBuffer = ""
                 dispatchedTagsThisTurn.removeAll()
+                lastServerOutputTranscript = ""
             }
 
             // User speech transcription
             if let inputTx = content["inputTranscription"] as? [String: Any],
                let txText  = inputTx["text"] as? String,
                !txText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                commandHandler?(.finalUserText(txText))
                 commandHandler?(.userText(txText))
             }
 
@@ -634,8 +669,28 @@ final class AudioModalCaller: NSObject, ObservableObject {
                 playbackEndWorkItem?.cancel()
                 currentTurnTextBuffer = ""
                 dispatchedTagsThisTurn.removeAll()
+                lastServerOutputTranscript = ""
             }
         }
+    }
+
+    private func deltaFromServerOutputTranscript(_ fullText: String) -> String {
+        let cleaned = fullText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty else { return "" }
+
+        let delta: String
+        if cleaned.hasPrefix(lastServerOutputTranscript) {
+            delta = String(cleaned.dropFirst(lastServerOutputTranscript.count))
+        } else if lastServerOutputTranscript.isEmpty {
+            delta = cleaned
+        } else if cleaned.count > lastServerOutputTranscript.count {
+            delta = String(cleaned.suffix(cleaned.count - lastServerOutputTranscript.count))
+        } else {
+            delta = cleaned
+        }
+
+        lastServerOutputTranscript = cleaned
+        return delta.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -770,6 +825,7 @@ final class AudioModalCaller: NSObject, ObservableObject {
             } else {
                 // Queue is full of control messages — drop new payload to protect ordering
                 print("[CatAI] ⚠️ WS send queue full, dropping payload")
+                print("[CATLive] ⚠️ WS send queue full, dropping payload")
                 return
             }
         }
@@ -790,6 +846,7 @@ final class AudioModalCaller: NSObject, ObservableObject {
                 self.wsSendInFlight = false
                 if let error {
                     print("[CatAI] ❌ WS send error: \(error) — clearing queue")
+                    print("[CATLive] ❌ WS send error: \(error) — clearing queue")
                     self.wsSendQueue.removeAll()
                 } else {
                     self.drainSendQueue()
@@ -806,6 +863,8 @@ final class AudioModalCaller: NSObject, ObservableObject {
         """
         You are Cat, the AI inspection assistant for Caterpillar heavy equipment.
         The inspector calls you "Hey Cat" — respond to that naturally.
+        You are an AI audio-visual inspection assistant for Caterpillar heavy equipment.
+        You perform real-time audio-visual inspections: you listen for mechanical sounds AND analyze images.
         Current task: \(taskContextTitle).
         Task description: \(taskContextDescription).
         Inspection ID: \(inspectionID.uuidString). Task ID: \(taskID.uuidString).
@@ -813,6 +872,9 @@ final class AudioModalCaller: NSObject, ObservableObject {
         RULES:
         - Keep responses concise and practical. Speak naturally.
         - ACTION INTENT ENGINE: Detect the user's underlying intent regardless of phrasing. Map action expressions to the correct macro tag.
+        - You have a companion ACOUSTIC ANALYSIS system that listens to mechanical sounds in real time.
+          When it detects an anomaly (grinding, knocking, vibration), it will send you an alert.
+          Acknowledge these alerts concisely, e.g. "Acoustic alert: grinding detected. Let me capture a photo to verify."
 
         VOICE MENU — read aloud when the user says "menu", "help", "what can I do", or seems stuck:
           "You can say:
@@ -836,6 +898,11 @@ final class AudioModalCaller: NSObject, ObservableObject {
            [image_feedback: Moderate — Visible rust on bracket\\nNormal — Tire acceptable]
         - Use \\n between findings inside the tag. Do NOT use • in the tag.
         - This tag is mandatory for every image analyzed.
+
+        ACOUSTIC ANALYSIS (when a [sound_alert] message is received):
+        - Acknowledge the acoustic finding briefly in speech.
+        - Incorporate it into your overall inspection assessment.
+        - If the finding is FAIL or MONITOR, recommend visual confirmation via photo capture.
 
         TEXT TAGS ([image_feedback:...], [capture_photo:...], [submit_task]) must appear in text output only, never spoken aloud.
         """
@@ -863,6 +930,7 @@ final class AudioModalCaller: NSObject, ObservableObject {
             isRecording = true
         } catch {
             print("[CatAI] ❌ Failed to create recorder: \(error)")
+            print("[CATLive] ❌ Failed to create recorder: \(error)")
             isRecording = false
         }
     }
@@ -879,6 +947,7 @@ final class AudioModalCaller: NSObject, ObservableObject {
     nonisolated private static func prepareImageBase64(imageURL: URL) -> String? {
         guard let image = UIImage(contentsOfFile: imageURL.path) else {
             print("[CatAI] prepareImageBase64: no image at \(imageURL.lastPathComponent)")
+            print("[CATLive] prepareImageBase64: no image at \(imageURL.lastPathComponent)")
             return nil
         }
         var quality: CGFloat = 0.6
@@ -889,9 +958,191 @@ final class AudioModalCaller: NSObject, ObservableObject {
         }
         guard let final = data, !final.isEmpty, final.count <= 700_000 else {
             print("[CatAI] prepareImageBase64: image too large or empty")
+            print("[CATLive] prepareImageBase64: image too large or empty")
             return nil
         }
         return final.base64EncodedString()
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // MARK: Acoustic Analysis (Modal API)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// Schedule acoustic analysis if we've accumulated enough audio.
+    private func scheduleAcousticAnalysisIfNeeded() {
+        guard acousticAnalysisTimer == nil else { return }
+        let bytesNeeded = acousticSampleRate * 2 * Int(acousticAnalysisIntervalSec) // Int16 = 2 bytes
+        guard acousticPCMBuffer.count >= bytesNeeded else { return }
+
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.acousticAnalysisTimer = nil
+            self.performAcousticAnalysis()
+        }
+        acousticAnalysisTimer = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1, execute: workItem)
+    }
+
+    /// Extract accumulated audio, convert to WAV, send to Modal API.
+    private func performAcousticAnalysis() {
+        guard !isAcousticAnalysisInFlight else { return }
+        guard !acousticPCMBuffer.isEmpty else { return }
+
+        isAcousticAnalysisInFlight = true
+        let pcmData = acousticPCMBuffer
+        acousticPCMBuffer = Data() // reset buffer
+        acousticAnalysisCount += 1
+        let analysisNum = acousticAnalysisCount
+
+        print("[CATLive] 🔊 Sending acoustic analysis #\(analysisNum) (\(pcmData.count) bytes)")
+
+        Task.detached(priority: .utility) { [weak self] in
+            guard let self else { return }
+
+            // Build WAV from raw PCM
+            let wavData = Self.buildWAV(pcmData: pcmData, sampleRate: 16000, channels: 1, bitsPerSample: 16)
+
+            // Send to Modal API
+            let result = await Self.sendAcousticToModal(wavData: wavData, equipmentID: "CAT-LIVE-\(analysisNum)")
+
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                self.isAcousticAnalysisInFlight = false
+
+                guard let result else {
+                    print("[CATLive] 🔊 Acoustic analysis #\(analysisNum): no result")
+                    return
+                }
+
+                let status = result["overall_status"] as? String ?? "UNKNOWN"
+                print("[CATLive] 🔊 Acoustic analysis #\(analysisNum): \(status)")
+
+                // Only dispatch anomaly if MONITOR or FAIL
+                if status == "FAIL" || status == "MONITOR" {
+                    let faults = result["faults"] as? [[String: Any]] ?? []
+                    let metrics = result["metrics"] as? [String: Any] ?? [:]
+
+                    var findings: [String] = []
+                    for fault in faults {
+                        let issue = fault["issue"] as? String ?? "Unknown issue"
+                        let severity = fault["severity"] as? String ?? "UNKNOWN"
+                        let confidence = fault["confidence"] as? Double ?? 0.0
+                        let reason = fault["technical_reason"] as? String ?? ""
+                        findings.append("\(severity): \(issue) (\(Int(confidence * 100))%) — \(reason)")
+                    }
+
+                    let centroid = metrics["avg_centroid_hz"] as? Double ?? 0
+                    let crestFactor = metrics["crest_factor"] as? Double ?? 0
+
+                    let summaryText = findings.isEmpty
+                        ? "Acoustic \(status): anomaly detected (centroid: \(Int(centroid))Hz, crest: \(String(format: "%.1f", crestFactor)))"
+                        : findings.joined(separator: "\n")
+
+                    // Dispatch to UI
+                    self.commandHandler?(.soundAnomaly(summaryText))
+
+                    // Also inject into Gemini conversation so it can respond
+                    self.sendAcousticAlertToGemini(status: status, findings: findings)
+                }
+            }
+        }
+    }
+
+    /// Build a WAV file from raw PCM Int16 data.
+    nonisolated private static func buildWAV(pcmData: Data, sampleRate: Int, channels: Int, bitsPerSample: Int) -> Data {
+        var wav = Data()
+        let dataSize = UInt32(pcmData.count)
+        let fileSize = UInt32(36 + pcmData.count)
+        let byteRate = UInt32(sampleRate * channels * bitsPerSample / 8)
+        let blockAlign = UInt16(channels * bitsPerSample / 8)
+
+        // RIFF header
+        wav.append(contentsOf: [0x52, 0x49, 0x46, 0x46]) // "RIFF"
+        wav.append(contentsOf: withUnsafeBytes(of: fileSize.littleEndian) { Array($0) })
+        wav.append(contentsOf: [0x57, 0x41, 0x56, 0x45]) // "WAVE"
+
+        // fmt sub-chunk
+        wav.append(contentsOf: [0x66, 0x6D, 0x74, 0x20]) // "fmt "
+        wav.append(contentsOf: withUnsafeBytes(of: UInt32(16).littleEndian) { Array($0) }) // sub-chunk size
+        wav.append(contentsOf: withUnsafeBytes(of: UInt16(1).littleEndian) { Array($0) })  // PCM format
+        wav.append(contentsOf: withUnsafeBytes(of: UInt16(channels).littleEndian) { Array($0) })
+        wav.append(contentsOf: withUnsafeBytes(of: UInt32(sampleRate).littleEndian) { Array($0) })
+        wav.append(contentsOf: withUnsafeBytes(of: byteRate.littleEndian) { Array($0) })
+        wav.append(contentsOf: withUnsafeBytes(of: blockAlign.littleEndian) { Array($0) })
+        wav.append(contentsOf: withUnsafeBytes(of: UInt16(bitsPerSample).littleEndian) { Array($0) })
+
+        // data sub-chunk
+        wav.append(contentsOf: [0x64, 0x61, 0x74, 0x61]) // "data"
+        wav.append(contentsOf: withUnsafeBytes(of: dataSize.littleEndian) { Array($0) })
+        wav.append(pcmData)
+
+        return wav
+    }
+
+    /// Send WAV audio to the Modal /analyze-sound endpoint.
+    nonisolated private static func sendAcousticToModal(wavData: Data, equipmentID: String) async -> [String: Any]? {
+        guard let url = URL(string: acousticAnalysisURL) else { return nil }
+
+        let boundary = "AcousticBoundary\(UUID().uuidString)"
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 15
+
+        var body = Data()
+
+        // audio file field
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"audio\"; filename=\"live_capture.wav\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: audio/wav\r\n\r\n".data(using: .utf8)!)
+        body.append(wavData)
+        body.append("\r\n".data(using: .utf8)!)
+
+        // equipment_id field
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"equipment_id\"\r\n\r\n".data(using: .utf8)!)
+        body.append(equipmentID.data(using: .utf8)!)
+        body.append("\r\n".data(using: .utf8)!)
+
+        body.append("--\(boundary)--\r\n".data(using: .utf8)!)
+        request.httpBody = body
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+                print("[CATLive] 🔊 Modal API returned non-200: \((response as? HTTPURLResponse)?.statusCode ?? -1)")
+                return nil
+            }
+            let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+            return json
+        } catch {
+            print("[CATLive] 🔊 Modal API error: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    /// Inject an acoustic alert into the Gemini WebSocket conversation.
+    private func sendAcousticAlertToGemini(status: String, findings: [String]) {
+        guard isLiveListening, websocketTask != nil else { return }
+
+        let findingsText = findings.isEmpty ? "Anomaly detected" : findings.joined(separator: "; ")
+        let alertMessage = "[sound_alert] Acoustic analysis result: \(status). \(findingsText). Please acknowledge this acoustic finding and recommend next steps."
+
+        let payload: [String: Any] = [
+            "clientContent": [
+                "turns": [[
+                    "role": "user",
+                    "parts": [["text": alertMessage]]
+                ]],
+                "turnComplete": true
+            ]
+        ]
+
+        guard let data = try? JSONSerialization.data(withJSONObject: payload),
+              let str = String(data: data, encoding: .utf8) else { return }
+
+        enqueueWSSend(str)
+        print("[CATLive] 🔊 Sent acoustic alert to Gemini: \(status)")
     }
 }
 
@@ -901,18 +1152,22 @@ private final class WebSocketDelegate: NSObject, URLSessionWebSocketDelegate {
     func urlSession(_ s: URLSession, webSocketTask: URLSessionWebSocketTask,
                     didOpenWithProtocol p: String?) {
         print("[CatAI] ✅ WebSocket opened")
+        print("[CATLive] ✅ WebSocket opened")
     }
     func urlSession(_ s: URLSession, webSocketTask: URLSessionWebSocketTask,
                     didCloseWith code: URLSessionWebSocketTask.CloseCode, reason: Data?) {
         let r = reason.flatMap { String(data: $0, encoding: .utf8) } ?? "none"
         print("[CatAI] ⚠️ WebSocket closed — code: \(code.rawValue), reason: \(r)")
+        print("[CATLive] ⚠️ WebSocket closed — code: \(code.rawValue), reason: \(r)")
     }
     func urlSession(_ s: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         if let error {
             print("[CatAI] ❌ Task error: \(error)")
+            print("[CATLive] ❌ Task error: \(error)")
         }
         if let http = task.response as? HTTPURLResponse {
             print("[CatAI] HTTP upgrade status: \(http.statusCode)")
+            print("[CATLive] HTTP upgrade status: \(http.statusCode)")
         }
     }
 }

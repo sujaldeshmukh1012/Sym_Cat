@@ -6,7 +6,7 @@
 	<integer>11</integer>
 	<key>logs</key>
 	<dict>
-		<key>226BE83D-C3B6-438A-AD78-03D4FEBF8691</key>
+		<key>3997E412-FD10-4474-8D96-6A4778EAC927</key>
 		<dict>
 			<key>className</key>
 			<string>IDECommandLineBuildLog</string>
@@ -15,7 +15,7 @@
 			<key>domainType</key>
 			<string>Xcode.IDEActivityLogDomainType.BuildLog</string>
 			<key>fileName</key>
-			<string>226BE83D-C3B6-438A-AD78-03D4FEBF8691.xcactivitylog</string>
+			<string>3997E412-FD10-4474-8D96-6A4778EAC927.xcactivitylog</string>
 			<key>hasPrimaryLog</key>
 			<true/>
 			<key>primaryObservable</key>
@@ -40,55 +40,13 @@
 			<key>signature</key>
 			<string>Building project CAT Inspect with scheme CAT Inspect and configuration Debug</string>
 			<key>timeStartedRecording</key>
-			<real>794037996.76256704</real>
+			<real>794039407.86259902</real>
 			<key>timeStoppedRecording</key>
-			<real>794038002.16570103</real>
+			<real>794039412.01471698</real>
 			<key>title</key>
 			<string>Building project CAT Inspect with scheme CAT Inspect and configuration Debug</string>
 			<key>uniqueIdentifier</key>
-			<string>226BE83D-C3B6-438A-AD78-03D4FEBF8691</string>
-		</dict>
-		<key>7589A14E-1A3E-41E0-86FC-1D349A1A212E</key>
-		<dict>
-			<key>className</key>
-			<string>IDECommandLineBuildLog</string>
-			<key>documentTypeString</key>
-			<string>&lt;nil&gt;</string>
-			<key>domainType</key>
-			<string>Xcode.IDEActivityLogDomainType.BuildLog</string>
-			<key>fileName</key>
-			<string>7589A14E-1A3E-41E0-86FC-1D349A1A212E.xcactivitylog</string>
-			<key>hasPrimaryLog</key>
-			<true/>
-			<key>primaryObservable</key>
-			<dict>
-				<key>highLevelStatus</key>
-				<string>E</string>
-				<key>totalNumberOfAnalyzerIssues</key>
-				<integer>0</integer>
-				<key>totalNumberOfErrors</key>
-				<integer>1</integer>
-				<key>totalNumberOfTestFailures</key>
-				<integer>0</integer>
-				<key>totalNumberOfWarnings</key>
-				<integer>3</integer>
-			</dict>
-			<key>schemeIdentifier-containerName</key>
-			<string>CAT Inspect project</string>
-			<key>schemeIdentifier-schemeName</key>
-			<string>CAT Inspect</string>
-			<key>schemeIdentifier-sharedScheme</key>
-			<integer>1</integer>
-			<key>signature</key>
-			<string>Building project CAT Inspect with scheme CAT Inspect and configuration Debug</string>
-			<key>timeStartedRecording</key>
-			<real>794037686.02827799</real>
-			<key>timeStoppedRecording</key>
-			<real>794037691.78496206</real>
-			<key>title</key>
-			<string>Building project CAT Inspect with scheme CAT Inspect and configuration Debug</string>
-			<key>uniqueIdentifier</key>
-			<string>7589A14E-1A3E-41E0-86FC-1D349A1A212E</string>
+			<string>3997E412-FD10-4474-8D96-6A4778EAC927</string>
 		</dict>
 	</dict>
 </dict>
