@@ -1,6 +1,6 @@
 // AudioService.swift
 // Gemini Live API — streams raw PCM audio to/from Gemini.
-// Architecture mirrors the working Python backend (test_live.py):
+// Architecture:
 //   Mic → 16 kHz PCM → base64 → realtimeInput → Gemini
 //   Gemini → 24 kHz PCM → AVAudioPlayerNode → speaker
 
@@ -19,12 +19,14 @@ final class AudioModalCaller: NSObject, ObservableObject {
     @Published var isLiveListening   = false
     @Published var isImageProcessing = false
 
-    // ── Commands (same enum as before) ───────────────────────────────────────
+    // ── Commands ─────────────────────────────────────────────────────────────
     enum LiveVoiceCommand {
         case capturePhoto
+        case capturePhotoWithContext(String)
         case assistantText(String)
         case userText(String)
         case imageFeedback(String)
+        case submitTask
     }
 
     // ── Config ───────────────────────────────────────────────────────────────
@@ -46,6 +48,12 @@ final class AudioModalCaller: NSObject, ObservableObject {
     // ── WebSocket ────────────────────────────────────────────────────────────
     private var websocketTask: URLSessionWebSocketTask?
     private var setupAcknowledged = false
+    private var currentTurnTextBuffer = ""
+
+    // FIX: Track which tag types have already been dispatched in the current
+    // turn to prevent duplicate commands from partial-chunk processing.
+    private var dispatchedTagsThisTurn: Set<String> = []
+
     private lazy var wsSession: URLSession = {
         URLSession(
             configuration: .default,
@@ -54,24 +62,25 @@ final class AudioModalCaller: NSObject, ObservableObject {
         )
     }()
 
-    // ── Audio engine (single engine for mic + speaker) ───────────────────────
+    // ── Audio engine ─────────────────────────────────────────────────────────
     private let audioEngine  = AVAudioEngine()
     private let playerNode   = AVAudioPlayerNode()
     private var pcmConverter: AVAudioConverter?
-    private let sendFormat   = AVAudioFormat(
+
+    private let sendFormat = AVAudioFormat(
         commonFormat: .pcmFormatInt16, sampleRate: 16000, channels: 1, interleaved: true
     )!
-    private let recvFormat   = AVAudioFormat(
+    private let recvFormat = AVAudioFormat(
         commonFormat: .pcmFormatInt16, sampleRate: 24000, channels: 1, interleaved: true
     )!
 
-    // ── Playback state (mute mic while Gemini speaks) ────────────────────────
-    private var isPlayingAudio = false
-    private var scheduledBufferCount = 0
-    private var geminiTurnComplete = true
+    // ── Playback state ───────────────────────────────────────────────────────
+    private var isPlayingAudio        = false
+    private var scheduledBufferCount  = 0
+    private var geminiTurnComplete    = true
     private var playbackEndWorkItem: DispatchWorkItem?
 
-    // ── STT for UI transcript display only (not sent to Gemini) ──────────────
+    // ── STT (UI transcript only) ─────────────────────────────────────────────
     private let speechRecognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     private var recognitionTask: SFSpeechRecognitionTask?
@@ -84,9 +93,14 @@ final class AudioModalCaller: NSObject, ObservableObject {
     private var liveSessionKey: String?
     private var commandHandler: ((LiveVoiceCommand) -> Void)?
 
-    // ── Recording (backward compat for stopAndStream) ────────────────────────
+    // ── Backward-compat recording ────────────────────────────────────────────
     private var recorder: AVAudioRecorder?
     private var currentFileName: String?
+
+    // ── WS send queue ────────────────────────────────────────────────────────
+    private var wsSendQueue: [String] = []
+    private var wsSendInFlight = false
+    private let wsSendQueueMax = 60   // FIX: cap to prevent unbounded growth
 
     // ─────────────────────────────────────────────────────────────────────────
     // MARK: Init
@@ -113,15 +127,19 @@ final class AudioModalCaller: NSObject, ObservableObject {
         if liveSessionKey == key, isLiveListening { return }
 
         stopLiveListening()
+
         liveSessionKey         = key
-        commandHandler         = onCommand
+        commandHandler = { cmd in
+            DispatchQueue.main.async { onCommand(cmd) }
+        }
         taskContextTitle       = taskTitle
         taskContextDescription = taskDescription
         sessionInspectionID    = inspectionID
         sessionTaskID          = taskID
 
         AVAudioSession.sharedInstance().requestRecordPermission { [weak self] granted in
-            guard let self, granted else {
+            guard let self else { return }
+            guard granted else {
                 DispatchQueue.main.async {
                     onCommand(.assistantText("Microphone permission required."))
                 }
@@ -130,7 +148,6 @@ final class AudioModalCaller: NSObject, ObservableObject {
             SFSpeechRecognizer.requestAuthorization { [weak self] status in
                 guard let self else { return }
                 Task { @MainActor in
-                    // Speech auth is optional — we only use it for UI transcript
                     if status != .authorized {
                         print("[GeminiLive] Speech auth not granted — transcript display disabled")
                     }
@@ -143,6 +160,7 @@ final class AudioModalCaller: NSObject, ObservableObject {
 
     func stopLiveListening() {
         print("[GeminiLive] stopLiveListening")
+
         // STT
         recognitionTask?.cancel()
         recognitionTask = nil
@@ -161,8 +179,17 @@ final class AudioModalCaller: NSObject, ObservableObject {
         websocketTask = nil
         setupAcknowledged = false
 
+        // FIX: Clear send queue and release command handler to break retain cycle
+        wsSendQueue.removeAll()
+        wsSendInFlight = false
+        commandHandler = nil
+
         // Reset state
+        currentTurnTextBuffer = ""
+        dispatchedTagsThisTurn.removeAll()
         isPlayingAudio = false
+        scheduledBufferCount = 0
+        geminiTurnComplete = true
         playbackEndWorkItem?.cancel()
         playbackEndWorkItem = nil
         isImageProcessing = false
@@ -172,8 +199,15 @@ final class AudioModalCaller: NSObject, ObservableObject {
         taskContextDescription = ""
     }
 
-    /// Backward compat
+    // ── Backward compat ──────────────────────────────────────────────────────
+
     func startRecording(inspectionID: UUID, taskID: UUID) {
+        // FIX: Don't reconfigure audio session if live session is active —
+        // that would break the live pipeline.
+        guard !isLiveListening else {
+            print("[GeminiLive] startRecording ignored: live session is active")
+            return
+        }
         let session = AVAudioSession.sharedInstance()
         try? session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth])
         try? session.setActive(true, options: .notifyOthersOnDeactivation)
@@ -196,15 +230,27 @@ final class AudioModalCaller: NSObject, ObservableObject {
         return currentFileName
     }
 
-    /// Send a captured image to Gemini via the live WebSocket
+    /// Send a captured image to Gemini via the live WebSocket.
     func sendCapturedImageToWebSocket(fileName: String, note: String) {
-        guard isLiveListening, websocketTask != nil, !isImageProcessing else { return }
+        // FIX: Guard both isLiveListening AND websocketTask existence
+        guard isLiveListening, websocketTask != nil else {
+            print("[GeminiLive] sendCapturedImageToWebSocket: no active session")
+            return
+        }
+        guard !isImageProcessing else {
+            print("[GeminiLive] sendCapturedImageToWebSocket: image already processing")
+            return
+        }
         isImageProcessing = true
 
         let imageURL = storageDir().appendingPathComponent(fileName)
-        Task.detached(priority: .utility) {
+
+        // FIX: Capture self weakly before the detached task to avoid retain cycles
+        Task.detached(priority: .utility) { [weak self] in
+            guard let self else { return }
             guard let base64 = Self.prepareImageBase64(imageURL: imageURL) else {
                 await MainActor.run { self.isImageProcessing = false }
+                print("[GeminiLive] sendCapturedImageToWebSocket: failed to encode image")
                 return
             }
             let payload: [String: Any] = [
@@ -212,7 +258,7 @@ final class AudioModalCaller: NSObject, ObservableObject {
                     "turns": [[
                         "role": "user",
                         "parts": [
-                            ["text": note],
+                            ["text": note.isEmpty ? "Please analyze this image." : note],
                             ["inlineData": ["mimeType": "image/jpeg", "data": base64]]
                         ]
                     ]],
@@ -229,7 +275,7 @@ final class AudioModalCaller: NSObject, ObservableObject {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // MARK: Audio session (configured ONCE)
+    // MARK: Audio session
     // ─────────────────────────────────────────────────────────────────────────
 
     private func configureAudioSession() -> Bool {
@@ -250,7 +296,7 @@ final class AudioModalCaller: NSObject, ObservableObject {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // MARK: Audio pipeline — mic capture + PCM playback
+    // MARK: Audio pipeline
     // ─────────────────────────────────────────────────────────────────────────
 
     private func startAudioPipeline() {
@@ -258,54 +304,70 @@ final class AudioModalCaller: NSObject, ObservableObject {
         let hwFormat  = inputNode.outputFormat(forBus: 0)
         print("[GeminiLive] Mic hardware format: \(hwFormat)")
 
-        // Converter: hardware format → 16 kHz mono Int16 for Gemini
-        pcmConverter = AVAudioConverter(from: hwFormat, to: sendFormat)
+        // FIX: Guard against zero sample rate which would crash AVAudioConverter
+        guard hwFormat.sampleRate > 0 else {
+            print("[GeminiLive] ❌ Invalid hardware format — sample rate is 0")
+            commandHandler?(.assistantText("Audio hardware unavailable."))
+            return
+        }
 
-        // Connect player node (Gemini output) to mixer for speaker playback
+        guard let converter = AVAudioConverter(from: hwFormat, to: sendFormat) else {
+            print("[GeminiLive] ❌ Failed to create AVAudioConverter")
+            commandHandler?(.assistantText("Audio conversion unavailable."))
+            return
+        }
+        pcmConverter = converter
+
+        // Connect player to mixer
+        // FIX: Disconnect first to avoid "already connected" assertion crashes
+        audioEngine.disconnectNodeOutput(playerNode)
         audioEngine.connect(playerNode, to: audioEngine.mainMixerNode, format: recvFormat)
 
-        // STT request (for UI transcript only)
+        // STT request
         let sttRequest = SFSpeechAudioBufferRecognitionRequest()
         sttRequest.shouldReportPartialResults = true
         sttRequest.taskHint = .dictation
         recognitionRequest = sttRequest
 
-        // Install mic tap
         inputNode.removeTap(onBus: 0)
 
-        let converter = pcmConverter!
         let targetFormat = sendFormat
 
         inputNode.installTap(onBus: 0, bufferSize: 4096, format: hwFormat) { [weak self] buffer, _ in
             guard let self, buffer.frameLength > 0 else { return }
+            guard !self.isPlayingAudio else { return }   // echo suppression
 
-            // Feed STT for display
             sttRequest.append(buffer)
-
-            // Skip sending audio while Gemini is speaking (echo suppression)
-            guard !self.isPlayingAudio else { return }
             guard self.setupAcknowledged else { return }
 
-            // Convert to 16 kHz Int16
-            let ratio = 16000.0 / buffer.format.sampleRate
-            let frameCount = AVAudioFrameCount(Double(buffer.frameLength) * ratio)
-            guard frameCount > 0,
-                  let converted = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: frameCount) else { return }
+            // FIX: Correct AVAudioConverter input block pattern.
+            // The previous "consumed" flag approach could stall the converter
+            // on subsequent calls. Use a single-use closure captured per call.
+            let ratio = 16000.0 / hwFormat.sampleRate
+            let outFrameCount = AVAudioFrameCount(max(1, Double(buffer.frameLength) * ratio))
 
-            var error: NSError?
-            var consumed = false
-            converter.convert(to: converted, error: &error) { _, outStatus in
-                if consumed { outStatus.pointee = .noDataNow; return nil }
-                consumed = true
+            guard let converted = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: outFrameCount) else {
+                return
+            }
+
+            var inputConsumed = false
+            var convError: NSError?
+
+            self.pcmConverter?.convert(to: converted, error: &convError) { _, outStatus in
+                if inputConsumed {
+                    outStatus.pointee = .noDataNow
+                    return nil
+                }
+                inputConsumed = true
                 outStatus.pointee = .haveData
                 return buffer
             }
-            guard error == nil, converted.frameLength > 0 else { return }
 
-            // Raw Int16 bytes → base64
-            let byteCount = Int(converted.frameLength) * 2
-            let pcmData = Data(bytes: converted.int16ChannelData![0], count: byteCount)
-            let base64 = pcmData.base64EncodedString()
+            guard convError == nil, converted.frameLength > 0 else { return }
+
+            let byteCount = Int(converted.frameLength) * MemoryLayout<Int16>.size
+            let pcmData   = Data(bytes: converted.int16ChannelData![0], count: byteCount)
+            let base64    = pcmData.base64EncodedString()
 
             let payload: [String: Any] = [
                 "realtimeInput": [
@@ -326,30 +388,35 @@ final class AudioModalCaller: NSObject, ObservableObject {
             audioEngine.prepare()
             try audioEngine.start()
             playerNode.play()
-            print("[GeminiLive] ✅ Audio engine started (mic + speaker)")
+            print("[GeminiLive] ✅ Audio engine started")
         } catch {
-            print("[GeminiLive] ❌ Audio engine failed: \(error)")
+            print("[GeminiLive] ❌ Audio engine start failed: \(error)")
+            commandHandler?(.assistantText("Audio engine failed: \(error.localizedDescription)"))
         }
 
-        // Start STT recognition task (for UI only)
-        recognitionTask = speechRecognizer?.recognitionTask(with: sttRequest) { [weak self] result, error in
-            guard let self else { return }
-            if let result {
-                let text = result.bestTranscription.formattedString
-                DispatchQueue.main.async {
-                    self.commandHandler?(.userText(String(text.suffix(120))))
+        // STT recognition (UI only)
+        if speechRecognizer?.isAvailable == true {
+            recognitionTask = speechRecognizer?.recognitionTask(with: sttRequest) { [weak self] result, error in
+                guard let self else { return }
+                if let result {
+                    let text = result.bestTranscription.formattedString
+                    DispatchQueue.main.async {
+                        self.commandHandler?(.userText(String(text.suffix(120))))
+                    }
                 }
-            }
-            if let error {
-                print("[GeminiLive] STT error (non-fatal): \(error.localizedDescription)")
+                if let error {
+                    print("[GeminiLive] STT error (non-fatal): \(error.localizedDescription)")
+                }
             }
         }
     }
 
-    /// Decode Gemini's 24 kHz PCM audio and schedule on playerNode
+    /// Decode Gemini's 24 kHz PCM audio and schedule on playerNode.
     private func playGeminiAudio(_ base64Data: String) {
-        guard let rawData = Data(base64Encoded: base64Data) else { return }
-        let frameCount = UInt32(rawData.count / 2) // 16-bit = 2 bytes per sample
+        guard let rawData = Data(base64Encoded: base64Data), !rawData.isEmpty else { return }
+
+        // 16-bit samples = 2 bytes each
+        let frameCount = UInt32(rawData.count / MemoryLayout<Int16>.size)
         guard frameCount > 0,
               let buffer = AVAudioPCMBuffer(pcmFormat: recvFormat, frameCapacity: frameCount) else { return }
         buffer.frameLength = frameCount
@@ -359,7 +426,6 @@ final class AudioModalCaller: NSObject, ObservableObject {
             memcpy(buffer.int16ChannelData![0], baseAddr, rawData.count)
         }
 
-        // Mute mic immediately, track how many buffers are in-flight
         isPlayingAudio = true
         scheduledBufferCount += 1
         playbackEndWorkItem?.cancel()
@@ -373,18 +439,13 @@ final class AudioModalCaller: NSObject, ObservableObject {
         }
     }
 
-    /// Only unmute mic after ALL buffers are done AND Gemini's turn is complete
-    /// AND a cooldown period has passed (to let room reverb die out).
+    /// Unmute mic only after all buffers finish AND Gemini's turn is complete.
     private func scheduleUnmuteIfReady() {
         playbackEndWorkItem?.cancel()
-
-        // Don't unmute yet if buffers are still playing or Gemini is still sending
         guard scheduledBufferCount == 0, geminiTurnComplete else { return }
 
-        // 0.9s cooldown after last audio finishes — prevents echo pickup
         let workItem = DispatchWorkItem { [weak self] in
             guard let self else { return }
-            // Double-check nothing new was scheduled during the cooldown
             if self.scheduledBufferCount == 0 && self.geminiTurnComplete {
                 self.isPlayingAudio = false
             }
@@ -398,17 +459,11 @@ final class AudioModalCaller: NSObject, ObservableObject {
     // ─────────────────────────────────────────────────────────────────────────
 
     private func connectWebSocket(inspectionID: UUID, taskID: UUID) {
-        print("[GeminiLive] Connecting WebSocket...")
+        print("[GeminiLive] Connecting WebSocket…")
         websocketTask = wsSession.webSocketTask(with: wsEndpoint)
         websocketTask?.resume()
 
-        let systemText = """
-        You are an AI assistant helping a Caterpillar field inspector complete an equipment inspection.
-        Current task: \(taskContextTitle).
-        Task description: \(taskContextDescription).
-        Be concise. If you need a photo taken, say "[capture_photo]".
-        Inspection ID: \(inspectionID.uuidString). Task ID: \(taskID.uuidString).
-        """
+        let systemText = buildSystemPrompt(inspectionID: inspectionID, taskID: taskID)
 
         let setupMessage: [String: Any] = [
             "setup": [
@@ -428,7 +483,10 @@ final class AudioModalCaller: NSObject, ObservableObject {
         ]
 
         guard let data = try? JSONSerialization.data(withJSONObject: setupMessage),
-              let str  = String(data: data, encoding: .utf8) else { return }
+              let str  = String(data: data, encoding: .utf8) else {
+            print("[GeminiLive] ❌ Failed to serialize setup message")
+            return
+        }
 
         print("[GeminiLive] Sending setup (\(str.count) chars)")
         websocketTask?.send(.string(str)) { [weak self] error in
@@ -438,7 +496,7 @@ final class AudioModalCaller: NSObject, ObservableObject {
                     self?.commandHandler?(.assistantText("Connection failed: \(error.localizedDescription)"))
                 }
             } else {
-                print("[GeminiLive] ✅ Setup sent, waiting for setupComplete...")
+                print("[GeminiLive] ✅ Setup sent, waiting for setupComplete…")
             }
         }
         receiveMessages()
@@ -450,8 +508,11 @@ final class AudioModalCaller: NSObject, ObservableObject {
             DispatchQueue.main.async {
                 switch result {
                 case .failure(let error):
+                    // FIX: Don't report errors after intentional teardown
+                    guard self.websocketTask != nil else { return }
                     print("[GeminiLive] ❌ WS receive error: \(error)")
                     self.commandHandler?(.assistantText("Connection dropped."))
+
                 case .success(let msg):
                     let raw: String?
                     switch msg {
@@ -460,7 +521,10 @@ final class AudioModalCaller: NSObject, ObservableObject {
                     @unknown default:    raw = nil
                     }
                     if let raw { self.handleServerMessage(raw) }
-                    self.receiveMessages()
+                    // Only continue receiving if session is still active
+                    if self.websocketTask != nil {
+                        self.receiveMessages()
+                    }
                 }
             }
         }
@@ -468,7 +532,10 @@ final class AudioModalCaller: NSObject, ObservableObject {
 
     private func handleServerMessage(_ raw: String) {
         guard let data = raw.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            print("[GeminiLive] ⚠️ Unparseable server message")
+            return
+        }
 
         // setupComplete → start audio pipeline
         if json["setupComplete"] != nil {
@@ -484,64 +551,168 @@ final class AudioModalCaller: NSObject, ObservableObject {
         if let content = json["serverContent"] as? [String: Any] {
             isImageProcessing = false
 
-            // Audio from Gemini — mark turn as in-progress (mic stays muted)
             if let turn = content["modelTurn"] as? [String: Any],
                let parts = turn["parts"] as? [[String: Any]] {
-                geminiTurnComplete = false  // Gemini is talking — keep mic muted
+
+                geminiTurnComplete = false  // keep mic muted while Gemini speaks
+
                 for part in parts {
-                    // Audio data
+                    // Audio
                     if let inline = part["inlineData"] as? [String: Any],
                        let mime   = inline["mimeType"] as? String,
                        mime.contains("audio"),
                        let b64    = inline["data"] as? String {
                         playGeminiAudio(b64)
                     }
-                    // Text (some models send text alongside audio)
-                    if let text = part["text"] as? String,
-                       !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
-                        if cleaned.lowercased().contains("[capture_photo]") {
-                            commandHandler?(.capturePhoto)
-                        } else {
-                            commandHandler?(.assistantText(cleaned))
-                        }
+                    // Text
+                    if let text = part["text"] as? String {
+                        currentTurnTextBuffer += text
+                        parseTextCommands()
                     }
                 }
             }
 
-            // turnComplete — Gemini finished its response, start unmute countdown
+            // turnComplete
             if content["turnComplete"] != nil {
                 geminiTurnComplete = true
-                scheduleUnmuteIfReady()
+
+                // FIX: If Gemini responded with text only (no audio), we must
+                // still clear isPlayingAudio to re-enable the mic.
+                if scheduledBufferCount == 0 {
+                    isPlayingAudio = false
+                } else {
+                    scheduleUnmuteIfReady()
+                }
+
+                currentTurnTextBuffer = ""
+                dispatchedTagsThisTurn.removeAll()
             }
 
-            // Gemini's transcription of what it heard (show in UI)
+            // User speech transcription
             if let inputTx = content["inputTranscription"] as? [String: Any],
                let txText  = inputTx["text"] as? String,
                !txText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 commandHandler?(.userText(txText))
             }
 
-            // Interruption — flush queued audio and unmute immediately
+            // Interruption — flush audio, unmute immediately
             if let interrupted = content["interrupted"] as? Bool, interrupted {
+                print("[GeminiLive] Interrupted by user")
                 playerNode.stop()
+                // FIX: Reconnect playerNode after stop so future audio plays
+                audioEngine.disconnectNodeOutput(playerNode)
+                audioEngine.connect(playerNode, to: audioEngine.mainMixerNode, format: recvFormat)
                 playerNode.play()
+
                 scheduledBufferCount = 0
                 geminiTurnComplete = true
                 isPlayingAudio = false
                 playbackEndWorkItem?.cancel()
+                currentTurnTextBuffer = ""
+                dispatchedTagsThisTurn.removeAll()
             }
         }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // MARK: Parse text action tags
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private func parseTextCommands() {
+        // FIX: Use dispatchedTagsThisTurn to prevent duplicate commands when
+        // parseTextCommands is called repeatedly on partial text chunks.
+
+        // [submit_task]
+        if !dispatchedTagsThisTurn.contains("submit_task"),
+           currentTurnTextBuffer.range(of: "\\[submit_task\\]",
+               options: [.regularExpression, .caseInsensitive]) != nil {
+            dispatchedTagsThisTurn.insert("submit_task")
+            commandHandler?(.submitTask)
+        }
+
+        // [capture_photo: <context>]  or  [capture_photo]
+        if !dispatchedTagsThisTurn.contains("capture_photo") {
+            if let range = currentTurnTextBuffer.range(
+                of: "\\[capture_photo:\\s*([^\\]]+)\\]",
+                options: [.regularExpression, .caseInsensitive]
+            ) {
+                dispatchedTagsThisTurn.insert("capture_photo")
+                let match   = String(currentTurnTextBuffer[range])
+                let context = extractTagValue(from: match)
+                if context.isEmpty {
+                    commandHandler?(.capturePhoto)
+                } else {
+                    commandHandler?(.capturePhotoWithContext(context))
+                }
+            } else if currentTurnTextBuffer.range(
+                of: "\\[capture_photo\\]",
+                options: [.regularExpression, .caseInsensitive]
+            ) != nil {
+                dispatchedTagsThisTurn.insert("capture_photo")
+                commandHandler?(.capturePhoto)
+            }
+        }
+
+        // [image_feedback: <bullets>]
+        if !dispatchedTagsThisTurn.contains("image_feedback"),
+           let range = currentTurnTextBuffer.range(
+               of: "\\[image_feedback:\\s*([^\\]]+)\\]",
+               options: [.regularExpression, .caseInsensitive]
+           ) {
+            dispatchedTagsThisTurn.insert("image_feedback")
+            let match    = String(currentTurnTextBuffer[range])
+            let feedback = extractTagValue(from: match)
+            if !feedback.isEmpty {
+                commandHandler?(.imageFeedback(feedback))
+            }
+        }
+
+        // Strip all dispatched tags from buffer so they don't pollute
+        // the assistantText output, then emit any remaining plain text.
+        var cleaned = currentTurnTextBuffer
+        let tagPatterns = [
+            "\\[submit_task\\]",
+            "\\[capture_photo:[^\\]]*\\]",
+            "\\[capture_photo\\]",
+            "\\[image_feedback:[^\\]]*\\]"
+        ]
+        for pattern in tagPatterns {
+            cleaned = cleaned.replacingOccurrences(
+                of: pattern, with: "",
+                options: [.regularExpression, .caseInsensitive]
+            )
+        }
+        let trimmed = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty {
+            commandHandler?(.assistantText(trimmed))
+        }
+    }
+
+    /// Extract the value after the colon in a `[tag: value]` string.
+    private func extractTagValue(from match: String) -> String {
+        guard let colonIdx = match.firstIndex(of: ":") else { return "" }
+        return match[match.index(after: colonIdx)...]
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "]", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     // ─────────────────────────────────────────────────────────────────────────
     // MARK: WebSocket send queue
     // ─────────────────────────────────────────────────────────────────────────
 
-    private var wsSendQueue: [String] = []
-    private var wsSendInFlight = false
-
     private func enqueueWSSend(_ payload: String) {
+        // FIX: Drop oldest audio frames (not control messages) if queue is full.
+        // Audio realtimeInput messages are safe to drop; control messages are not.
+        if wsSendQueue.count >= wsSendQueueMax {
+            if let dropIdx = wsSendQueue.firstIndex(where: { $0.contains("realtimeInput") }) {
+                wsSendQueue.remove(at: dropIdx)
+            } else {
+                // Queue is full of control messages — drop new payload to protect ordering
+                print("[GeminiLive] ⚠️ WS send queue full, dropping payload")
+                return
+            }
+        }
         wsSendQueue.append(payload)
         drainSendQueue()
     }
@@ -557,10 +728,56 @@ final class AudioModalCaller: NSObject, ObservableObject {
             guard let self else { return }
             DispatchQueue.main.async {
                 self.wsSendInFlight = false
-                if error != nil { self.wsSendQueue.removeAll() }
-                else            { self.drainSendQueue() }
+                if let error {
+                    print("[GeminiLive] ❌ WS send error: \(error) — clearing queue")
+                    self.wsSendQueue.removeAll()
+                } else {
+                    self.drainSendQueue()
+                }
             }
         }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // MARK: System prompt
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private func buildSystemPrompt(inspectionID: UUID, taskID: UUID) -> String {
+        """
+        You are an AI inspection assistant for Caterpillar heavy equipment.
+        Current task: \(taskContextTitle).
+        Task description: \(taskContextDescription).
+        Inspection ID: \(inspectionID.uuidString). Task ID: \(taskID.uuidString).
+
+        RULES:
+        - Keep responses concise and practical. Speak naturally.
+        - ACTION INTENT ENGINE: Detect the user's underlying intent regardless of phrasing. Map action expressions to the correct macro tag.
+
+        VOICE MENU — read aloud when the user says "menu", "help", "what can I do", or seems stuck:
+          "You can say:
+           1. Capture an image — to take and analyze a photo.
+           2. Submit the task — to save findings and go to the next task.
+           3. Menu — to hear these options again."
+          If the user just captured an image:
+           "Your findings have been saved. You can capture another image or submit the task."
+
+        ACTION MACROS:
+        1. CAPTURE PHOTO: Detect intent to photograph, analyze, view, or 'look at' something.
+           Tag: [capture_photo: <context>]  (context = what they are pointing out, or 'general inspection')
+           Examples: "Check this rusting" → [capture_photo: rusting], "Take a pic" → [capture_photo: general inspection]
+        2. SUBMIT TASK: Detect intent to finish, complete, submit, or move on.
+           Tag: [submit_task]
+
+        IMAGE ANALYSIS (when an image is received):
+        1. Detect anomalies, rank EACH as: Moderate, Pass, or Normal.
+        2. Speak findings as: "Finding 1: [rank] — [one-line description]."
+        3. CRITICAL: Always output a structured text tag EXACTLY like this:
+           [image_feedback: Moderate — Visible rust on bracket\\nNormal — Tire acceptable]
+        - Use \\n between findings inside the tag. Do NOT use • in the tag.
+        - This tag is mandatory for every image analyzed.
+
+        TEXT TAGS ([image_feedback:...], [capture_photo:...], [submit_task]) must appear in text output only, never spoken aloud.
+        """
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -571,15 +788,22 @@ final class AudioModalCaller: NSObject, ObservableObject {
         let name = "audio_\(inspectionID.uuidString.prefix(6))_\(taskID.uuidString.prefix(6))_\(Int(Date().timeIntervalSince1970)).m4a"
         let url  = storageDir().appendingPathComponent(name)
         currentFileName = name
+
         let settings: [String: Any] = [
             AVFormatIDKey:            Int(kAudioFormatMPEG4AAC),
             AVSampleRateKey:          44100,
             AVNumberOfChannelsKey:    1,
             AVEncoderAudioQualityKey: AVAudioQuality.medium.rawValue
         ]
-        recorder = try? AVAudioRecorder(url: url, settings: settings)
-        recorder?.record()
-        isRecording = true
+        // FIX: Log recorder creation errors instead of silently swallowing them
+        do {
+            recorder = try AVAudioRecorder(url: url, settings: settings)
+            recorder?.record()
+            isRecording = true
+        } catch {
+            print("[GeminiLive] ❌ Failed to create recorder: \(error)")
+            isRecording = false
+        }
     }
 
     private func storageDir() -> URL {
@@ -592,14 +816,20 @@ final class AudioModalCaller: NSObject, ObservableObject {
     // ─────────────────────────────────────────────────────────────────────────
 
     nonisolated private static func prepareImageBase64(imageURL: URL) -> String? {
-        guard let image = UIImage(contentsOfFile: imageURL.path) else { return nil }
+        guard let image = UIImage(contentsOfFile: imageURL.path) else {
+            print("[GeminiLive] prepareImageBase64: no image at \(imageURL.lastPathComponent)")
+            return nil
+        }
         var quality: CGFloat = 0.6
         var data = image.jpegData(compressionQuality: quality)
         while let current = data, current.count > 350_000, quality > 0.2 {
             quality -= 0.1
             data = image.jpegData(compressionQuality: quality)
         }
-        guard let final = data, !final.isEmpty, final.count <= 700_000 else { return nil }
+        guard let final = data, !final.isEmpty, final.count <= 700_000 else {
+            print("[GeminiLive] prepareImageBase64: image too large or empty")
+            return nil
+        }
         return final.base64EncodedString()
     }
 }
@@ -607,17 +837,21 @@ final class AudioModalCaller: NSObject, ObservableObject {
 // MARK: - WebSocket Delegate
 
 private final class WebSocketDelegate: NSObject, URLSessionWebSocketDelegate {
-    func urlSession(_ s: URLSession, webSocketTask: URLSessionWebSocketTask, didOpenWithProtocol p: String?) {
+    func urlSession(_ s: URLSession, webSocketTask: URLSessionWebSocketTask,
+                    didOpenWithProtocol p: String?) {
         print("[GeminiLive] ✅ WebSocket opened")
     }
-    func urlSession(_ s: URLSession, webSocketTask: URLSessionWebSocketTask, didCloseWith code: URLSessionWebSocketTask.CloseCode, reason: Data?) {
+    func urlSession(_ s: URLSession, webSocketTask: URLSessionWebSocketTask,
+                    didCloseWith code: URLSessionWebSocketTask.CloseCode, reason: Data?) {
         let r = reason.flatMap { String(data: $0, encoding: .utf8) } ?? "none"
         print("[GeminiLive] ⚠️ WebSocket closed — code: \(code.rawValue), reason: \(r)")
     }
     func urlSession(_ s: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        if let error { print("[GeminiLive] ❌ Task error: \(error)") }
+        if let error {
+            print("[GeminiLive] ❌ Task error: \(error)")
+        }
         if let http = task.response as? HTTPURLResponse {
-            print("[GeminiLive] HTTP upgrade: \(http.statusCode)")
+            print("[GeminiLive] HTTP upgrade status: \(http.statusCode)")
         }
     }
 }

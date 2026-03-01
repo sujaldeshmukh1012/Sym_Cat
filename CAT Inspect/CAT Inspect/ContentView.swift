@@ -2766,6 +2766,10 @@ private struct FleetInspectionWorkflowView: View {
     @State private var liveVoiceStatus = ""
     @State private var liveUserSnippet = ""
     @State private var liveAISentence = ""
+    @State private var photoFeedbackCount: Int = 0
+
+    // Bottom card collapse state
+    @State private var isCardCollapsed = false
 
     private var record: FleetInspectionRecord? {
         inspectionDB.record(for: inspectionID)
@@ -2938,12 +2942,11 @@ private struct FleetInspectionWorkflowView: View {
                                 taskControlCard(task)
                             }
                         }
-                        .frame(maxHeight: 230)
                     }
                 }
             }
         }
-        .padding(12)
+        .padding(12)        
         .background(
             RoundedRectangle(cornerRadius: 18)
                 .fill(CATTheme.card.opacity(0.95))
@@ -2954,6 +2957,9 @@ private struct FleetInspectionWorkflowView: View {
         )
         .padding(.horizontal, 10)
         .padding(.bottom, 10)
+        .frame(maxHeight: UIScreen.main.bounds.height * (isCardCollapsed ? 0.25 : 0.45))
+        .clipped()
+        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: isCardCollapsed)
     }
 
     private var completionActionsCard: some View {
@@ -3039,29 +3045,44 @@ private struct FleetInspectionWorkflowView: View {
                         .font(.caption.weight(.bold))
                         .foregroundStyle(CATTheme.success)
                 }
+                // Toggle collapse button
+                Button {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                        isCardCollapsed.toggle()
+                    }
+                } label: {
+                    Image(systemName: isCardCollapsed ? "chevron.up.circle.fill" : "chevron.down.circle.fill")
+                        .font(.title2)
+                        .foregroundStyle(CATTheme.heading)
+                }
             }
 
             Text(task.title)
                 .font(.headline.weight(.bold))
                 .foregroundStyle(task.completed ? CATTheme.success : CATTheme.heading)
-            Text(task.detail)
-                .font(.caption)
-                .foregroundStyle(CATTheme.body)
-            if task.backendSyncStatus == "failed" {
-                Text("Backend sync failed: \(task.backendError)")
-                    .font(.caption2)
-                    .foregroundStyle(CATTheme.warning)
-                    .lineLimit(2)
-            } else if task.backendSyncStatus == "synced" {
-                Text("Synced to backend")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(CATTheme.success)
+                .lineLimit(isCardCollapsed ? 1 : nil)
+
+            if !isCardCollapsed {
+                Text(task.detail)
+                    .font(.caption)
+                    .foregroundStyle(CATTheme.body)
+                if task.backendSyncStatus == "failed" {
+                    Text("Backend sync failed: \(task.backendError)")
+                        .font(.caption2)
+                        .foregroundStyle(CATTheme.warning)
+                        .lineLimit(2)
+                } else if task.backendSyncStatus == "synced" {
+                    Text("Synced to backend")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(CATTheme.success)
+                }
             }
 
             if !task.started {
                 Button {
                     inspectionDB.markTaskStarted(inspectionID: inspectionID, taskID: task.id)
                     beginLiveAI(for: task.id)
+                    isCardCollapsed = false
                 } label: {
                     Text("Start Task")
                         .font(.subheadline.weight(.bold))
@@ -3086,7 +3107,7 @@ private struct FleetInspectionWorkflowView: View {
                             )
                         }
                     } label: {
-                        Label("Capture Photo (\(capturedPhotoFileNames.count)/5)", systemImage: "camera.fill")
+                        Label(isCardCollapsed ? "Photo" : "Capture Photo (\(capturedPhotoFileNames.count)/5)", systemImage: "camera.fill")
                             .font(.caption.weight(.bold))
                             .frame(maxWidth: .infinity, minHeight: 40)
                     }
@@ -3107,7 +3128,7 @@ private struct FleetInspectionWorkflowView: View {
                         }
                     } label: {
                         Label(
-                            voiceService.isLiveListening ? "Talk to AI (On)" : "Talk to AI",
+                            voiceService.isLiveListening ? "Talk (On)" : "Talk to AI",
                             systemImage: voiceService.isLiveListening ? "waveform.circle.fill" : "waveform.circle"
                         )
                         .font(.caption.weight(.bold))
@@ -3126,6 +3147,7 @@ private struct FleetInspectionWorkflowView: View {
                     .opacity(isTaskSyncing ? 0.5 : 1.0)
                 }
 
+                // Live conversation panel always visible
                 if !liveUserSnippet.isEmpty || !liveAISentence.isEmpty {
                     LiveConversationPanel(userSnippet: liveUserSnippet, aiSentence: liveAISentence)
                 }
@@ -3139,83 +3161,62 @@ private struct FleetInspectionWorkflowView: View {
                     }
                 }
 
-                if !capturedPhotoFileNames.isEmpty {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 8) {
-                            ForEach(capturedPhotoFileNames, id: \.self) { fileName in
-                                ZStack(alignment: .topTrailing) {
-                                    Button {
-                                        selectedPreviewPhotoFileName = fileName
-                                    } label: {
-                                        TaskPhotoThumb(fileName: fileName)
+                if !isCardCollapsed {
+                    if !capturedPhotoFileNames.isEmpty {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 12) {
+                                ForEach(capturedPhotoFileNames, id: \.self) { fileName in
+                                    ZStack(alignment: .topTrailing) {
+                                        Button {
+                                            selectedPreviewPhotoFileName = fileName
+                                        } label: {
+                                            TaskPhotoThumb(fileName: fileName)
+                                        }
+                                        Button {
+                                            capturedPhotoFileNames.removeAll { $0 == fileName }
+                                        } label: {
+                                            Image(systemName: "xmark.circle.fill")
+                                                .font(.body.bold())
+                                                .foregroundStyle(CATTheme.critical)
+                                                .background(Circle().fill(CATTheme.card).padding(-2))
+                                        }
+                                        .offset(x: 10, y: -10)
                                     }
-                                    Button {
-                                        capturedPhotoFileNames.removeAll { $0 == fileName }
-                                    } label: {
-                                        Image(systemName: "xmark.circle.fill")
-                                            .font(.caption.bold())
-                                            .foregroundStyle(CATTheme.critical)
-                                            .background(Circle().fill(CATTheme.card))
-                                    }
-                                    .offset(x: 6, y: -6)
                                 }
                             }
+                            .padding(.vertical, 4)
                         }
+                        .frame(height: 96)
                     }
-                    .frame(height: 56)
-                }
 
-                CATTextEditorField(title: "Task Feedback", text: $feedbackText, minHeight: 50)
-                Picker("Task Status", selection: $selectedWalkthroughStatus) {
-                    ForEach(TaskReportStatus.allCases, id: \.self) { state in
-                        Text(state.rawValue).tag(state)
+                    CATTextEditorField(title: "Task Feedback", text: $feedbackText, minHeight: 50)
+                    Picker("Task Status", selection: $selectedWalkthroughStatus) {
+                        ForEach(TaskReportStatus.allCases, id: \.self) { state in
+                            Text(state.rawValue).tag(state)
+                        }
                     }
-                }
-                .pickerStyle(.segmented)
+                    .pickerStyle(.segmented)
 
-                Button {
-                    isTaskSyncing = true
-                    voiceService.stopLiveListening()
-                    Task {
-                        let audioFileName = await voiceService.stopAndStream(
-                            inspectionID: inspectionID,
-                            taskID: task.id,
-                            feedbackText: feedbackText,
-                            photoFileName: capturedPhotoFileNames.last
-                        )
-                        appLoadingMessage = "Submitting task \(task.taskNumber)..."
-                        let syncStatus = await inspectionDB.saveTaskFeedbackAndSync(
-                            inspectionID: inspectionID,
-                            taskID: task.id,
-                            feedbackText: feedbackText,
-                            photoFileNames: capturedPhotoFileNames,
-                            audioFileName: audioFileName,
-                            walkthroughStatus: selectedWalkthroughStatus
-                        )
-                        appLoadingMessage = nil
-                        isTaskSyncing = false
-                        sendStatusText = "Task \(task.taskNumber): \(syncStatus)"
-                        if let nextTaskID = nextTaskID(after: task.id) {
-                            selectedTaskID = nextTaskID
+                    Button {
+                        submitCurrentTaskButtonFlow(task)
+                    } label: {
+                        HStack(spacing: 8) {
+                            if isTaskSyncing {
+                                ProgressView().tint(CATTheme.catBlack)
+                            } else {
+                                Image(systemName: "paperplane.fill")
+                            }
+                            Text(isTaskSyncing ? "Uploading..." : "Send Feedback")
+                                .font(.subheadline.weight(.bold))
                         }
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .foregroundStyle(CATTheme.catBlack)
+                        .background(CATTheme.headerGradient)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
                     }
-                } label: {
-                    HStack(spacing: 8) {
-                        if isTaskSyncing {
-                            ProgressView().tint(CATTheme.catBlack)
-                        } else {
-                            Image(systemName: "paperplane.fill")
-                        }
-                        Text(isTaskSyncing ? "Uploading..." : "Send Feedback")
-                            .font(.subheadline.weight(.bold))
-                    }
-                    .frame(maxWidth: .infinity, minHeight: 44)
-                    .foregroundStyle(CATTheme.catBlack)
-                    .background(CATTheme.headerGradient)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .disabled(isTaskSyncing)
+                    .opacity(isTaskSyncing ? 0.55 : 1.0)
                 }
-                .disabled(isTaskSyncing)
-                .opacity(isTaskSyncing ? 0.55 : 1.0)
             }
         }
         .padding(10)
@@ -3225,11 +3226,40 @@ private struct FleetInspectionWorkflowView: View {
         )
     }
 
+    private func submitCurrentTaskButtonFlow(_ task: FleetTaskRecord) {
+        isTaskSyncing = true
+        voiceService.stopLiveListening()
+        Task {
+            let audioFileName = await voiceService.stopAndStream(
+                inspectionID: inspectionID,
+                taskID: task.id,
+                feedbackText: feedbackText,
+                photoFileName: capturedPhotoFileNames.last
+            )
+            appLoadingMessage = "Submitting task \(task.taskNumber)..."
+            let syncStatus = await inspectionDB.saveTaskFeedbackAndSync(
+                inspectionID: inspectionID,
+                taskID: task.id,
+                feedbackText: feedbackText,
+                photoFileNames: capturedPhotoFileNames,
+                audioFileName: audioFileName,
+                walkthroughStatus: selectedWalkthroughStatus
+            )
+            appLoadingMessage = nil
+            isTaskSyncing = false
+            sendStatusText = "Task \(task.taskNumber): \(syncStatus)"
+            if let nextTaskID = nextTaskID(after: task.id) {
+                selectedTaskID = nextTaskID
+            }
+        }
+    }
+
     private func syncInputsWithCurrentTask() {
         guard let task = currentTask else { return }
         feedbackText = task.feedbackText
         selectedWalkthroughStatus = task.walkthroughStatus
         capturedPhotoFileNames = task.photoFileNames
+        photoFeedbackCount = 0
         selectedPreviewPhotoFileName = nil
         if task.started && !task.completed {
             beginLiveAI(for: task.id)
@@ -3268,7 +3298,7 @@ private struct FleetInspectionWorkflowView: View {
             taskID: taskID,
             taskTitle: task?.title ?? "",
             taskDescription: task?.detail ?? ""
-        ) { command in
+        ) { [self] command in
             switch command {
             case .capturePhoto:
                 guard capturedPhotoFileNames.count < 5 else { return }
@@ -3279,32 +3309,109 @@ private struct FleetInspectionWorkflowView: View {
                     liveVoiceStatus = "Image sent to AI for analysis..."
                     voiceService.sendCapturedImageToWebSocket(
                         fileName: filename,
-                        note: "AI-triggered captured image for immediate analysis."
+                        note: "Captured image for general inspection analysis."
+                    )
+                }
+            case .capturePhotoWithContext(let context):
+                guard capturedPhotoFileNames.count < 5 else { return }
+                guard !voiceService.isImageProcessing else { return }
+                cameraService.capturePhoto { filename in
+                    guard let filename else { return }
+                    capturedPhotoFileNames.append(filename)
+                    liveVoiceStatus = "Analyzing: \(context)..."
+                    voiceService.sendCapturedImageToWebSocket(
+                        fileName: filename,
+                        note: "Inspect this image. Focus: \(context). Detect anomalies, rank each as Moderate/Pass/Normal."
                     )
                 }
             case .assistantText(let text):
-                liveVoiceStatus = "AI: \(text)"
+                liveVoiceStatus = "AI listening..."
+                if !text.isEmpty {
+                    liveUserSnippet = ""
+                }
                 updateLiveAISentence(text)
             case .userText(let text):
+                if !text.isEmpty {
+                    liveAISentence = ""
+                }
                 updateLiveUserSnippet(text)
             case .imageFeedback(let text):
                 liveVoiceStatus = "Image analysis received."
-                updateLiveAISentence(text)
                 appendFeedbackBullet(text)
+            case .submitTask:
+                liveVoiceStatus = "Submitting task..."
+                submitCurrentTask()
             }
         }
     }
 
-    private func appendFeedbackBullet(_ value: String) {
-        let cleaned = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !cleaned.isEmpty else { return }
-        if feedbackText.contains(cleaned) { return }
-        if feedbackText.isEmpty {
-            feedbackText = "• \(cleaned)"
-        } else {
-            feedbackText += "\n• \(cleaned)"
+    /// Voice-triggered task submission — same logic as "Send Feedback" button
+    private func submitCurrentTask() {
+        guard let task = currentTask, !isTaskSyncing else { return }
+        isTaskSyncing = true
+        voiceService.stopLiveListening()
+        Task {
+            let audioFileName = await voiceService.stopAndStream(
+                inspectionID: inspectionID,
+                taskID: task.id,
+                feedbackText: feedbackText,
+                photoFileName: capturedPhotoFileNames.last
+            )
+            appLoadingMessage = "Submitting task \(task.taskNumber)..."
+            let syncStatus = await inspectionDB.saveTaskFeedbackAndSync(
+                inspectionID: inspectionID,
+                taskID: task.id,
+                feedbackText: feedbackText,
+                photoFileNames: capturedPhotoFileNames,
+                audioFileName: audioFileName,
+                walkthroughStatus: selectedWalkthroughStatus
+            )
+            appLoadingMessage = nil
+            isTaskSyncing = false
+            sendStatusText = "Task \(task.taskNumber): \(syncStatus)"
+            // Navigate to next task and auto-start it
+            if let nextID = nextTaskID(after: task.id) {
+                selectedTaskID = nextID
+                // Auto-start the next task (mark started + begin live AI)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    self.inspectionDB.markTaskStarted(inspectionID: self.inspectionID, taskID: nextID)
+                    self.syncInputsWithCurrentTask()
+                }
+            }
         }
     }
+
+private func appendFeedbackBullet(_ value: String) {
+    let cleaned = value
+        .replacingOccurrences(of: "\\n", with: "\n")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !cleaned.isEmpty else { return }
+
+    // Increment photo number for this feedback batch
+    photoFeedbackCount += 1
+    let photoLabel = "Photo \(photoFeedbackCount):"
+
+    // Split Gemini's multi-line findings into individual lines
+    let lines = cleaned
+        .components(separatedBy: .newlines)
+        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        .map { $0.hasPrefix("•") ? String($0.dropFirst()).trimmingCharacters(in: .whitespaces) : $0 }
+        .filter { !$0.isEmpty }
+
+    guard !lines.isEmpty else { return }
+
+    // Build numbered sub-items: "  1. Finding text"
+    let numberedLines = lines.enumerated()
+        .map { idx, line in "  \(idx + 1). \(line)" }
+        .joined(separator: "\n")
+
+    let block = "\(photoLabel)\n\(numberedLines)"
+
+    // Deduplicate: skip if this block was already appended
+    if feedbackText.contains(photoLabel) { return }
+
+    feedbackText = feedbackText.isEmpty ? block : feedbackText + "\n\n" + block
+}
 
     private func updateLiveUserSnippet(_ text: String) {
         let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -3403,10 +3510,10 @@ private struct TaskPhotoThumb: View {
                 }
             }
         }
-        .frame(width: 72, height: 52)
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .frame(width: 110, height: 80)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
         .overlay(
-            RoundedRectangle(cornerRadius: 8)
+            RoundedRectangle(cornerRadius: 10)
                 .stroke(CATTheme.cardBorder, lineWidth: 1)
         )
     }
