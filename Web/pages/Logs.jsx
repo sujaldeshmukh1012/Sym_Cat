@@ -5,8 +5,10 @@ export default function Logs() {
   const [logs, setLogs] = useState([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+  const [currentPage, setCurrentPage] = useState(1)
   const [syncStatus, setSyncStatus] = useState('synced')
   const [error, setError] = useState(null)
+  const pageSize = 10
 
   useEffect(() => {
     fetchLogs()
@@ -79,10 +81,37 @@ export default function Logs() {
     String(log.feedback ?? '').toLowerCase().includes(query)
   )
 
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize))
+  const effectivePage = Math.min(currentPage, totalPages)
+  const startIndex = (effectivePage - 1) * pageSize
+  const endIndex = startIndex + pageSize
+  const paginatedLogs = filtered.slice(startIndex, endIndex)
+
+  const showStart = filtered.length === 0 ? 0 : startIndex + 1
+  const showEnd = filtered.length === 0 ? 0 : Math.min(endIndex, filtered.length)
+
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [query])
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages)
+    }
+  }, [currentPage, totalPages])
+
+  const pageNumbers = (() => {
+    if (totalPages <= 7) return Array.from({ length: totalPages }, (_, index) => index + 1)
+    if (effectivePage <= 4) return [1, 2, 3, 4, 5, '…', totalPages]
+    if (effectivePage >= totalPages - 3) return [1, '…', totalPages - 4, totalPages - 3, totalPages - 2, totalPages - 1, totalPages]
+    return [1, '…', effectivePage - 1, effectivePage, effectivePage + 1, '…', totalPages]
+  })()
+
   function getStateBadgeClass(stateValue) {
     const normalized = String(stateValue ?? '').toLowerCase().trim()
     if (normalized === 'completed' || normalized === 'confirmed' || normalized === 'approved') return 'badge-success'
-    if (normalized === 'pending' || normalized === 'in_progress' || normalized === 'in progress') return 'badge-warning'
+    if (normalized === 'pending') return 'badge-warning'
+    if (normalized === 'in_progress' || normalized === 'in progress' || normalized === 'in-progress') return 'badge-info-soft'
     if (normalized === 'declined' || normalized === 'rejected' || normalized === 'failed') return 'badge-critical'
     return 'badge-info'
   }
@@ -138,14 +167,14 @@ export default function Logs() {
           <table>
             <thead>
               <tr>
-                <th>ID</th>
-                <th>Fleet Serial</th>
-                <th>Inspection ID</th>
-                <th>Title</th>
-                <th>State</th>
-                <th>Description</th>
-                <th>Feedback</th>
-                <th>Created At</th>
+                <th style={{ textAlign: 'center' }}>ID</th>
+                <th style={{ textAlign: 'center' }}>Fleet Serial</th>
+                <th style={{ textAlign: 'center' }}>Inspection ID</th>
+                <th style={{ textAlign: 'center' }}>Title</th>
+                <th style={{ textAlign: 'center' }}>State</th>
+                <th style={{ textAlign: 'center' }}>Description</th>
+                <th style={{ textAlign: 'center' }}>Feedback</th>
+                <th style={{ textAlign: 'center' }}>Created At</th>
               </tr>
             </thead>
             <tbody>
@@ -168,30 +197,72 @@ export default function Logs() {
                   </td>
                 </tr>
               ) : (
-                filtered.map(log => (
+                paginatedLogs.map(log => (
                   <tr key={log.id}>
-                    <td className="mono" style={{ color: 'var(--text-muted)', fontSize: 12 }}>{log.id}</td>
-                    <td className="mono" style={{ color: 'var(--text-muted)', fontSize: 12 }}>{log.fleet_serial || '—'}</td>
-                    <td className="mono" style={{ color: 'var(--text-secondary)', fontSize: 12 }}>{log.inspection_id || '—'}</td>
-                    <td style={{ fontWeight: 600 }}>{log.title || '—'}</td>
-                    <td>
+                    <td className="mono" style={{ color: 'var(--text-muted)', fontSize: 12, textAlign: 'center' }}>{log.id}</td>
+                    <td className="mono" style={{ color: 'var(--text-muted)', fontSize: 12, textAlign: 'center' }}>{log.fleet_serial || '—'}</td>
+                    <td className="mono" style={{ color: 'var(--text-secondary)', fontSize: 12, textAlign: 'center' }}>{log.inspection_id || '—'}</td>
+                    <td style={{ fontWeight: 600, textAlign: 'center' }}>{log.title || '—'}</td>
+                    <td style={{ textAlign: 'center' }}>
                       <span className={`badge ${getStateBadgeClass(log.resolved_state)}`}>
                         <span className="badge-dot" /> {log.resolved_state || '—'}
                       </span>
                     </td>
-                    <td style={{ color: 'var(--text-secondary)', maxWidth: 360 }}>
+                    <td style={{ color: 'var(--text-secondary)', maxWidth: 360, textAlign: 'center' }}>
                       <span className="logs-text-cell" title={log.description || ''}>{truncateText(log.description)}</span>
                     </td>
-                    <td style={{ color: 'var(--text-secondary)', maxWidth: 360 }}>
+                    <td style={{ color: 'var(--text-secondary)', maxWidth: 360, textAlign: 'center' }}>
                       <span className="logs-text-cell" title={log.feedback || ''}>{truncateText(log.feedback)}</span>
                     </td>
-                    <td className="mono" style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{formatDate(log.created_at)}</td>
+                    <td className="mono" style={{ fontSize: 12, color: 'var(--text-secondary)', textAlign: 'center' }}>{formatDate(log.created_at)}</td>
                   </tr>
                 ))
               )}
             </tbody>
           </table>
         </div>
+
+        {!loading && filtered.length > 0 && (
+          <div className="inventory-pagination">
+            <div className="inventory-pagination-meta">
+              Showing <span className="mono">{showStart}-{showEnd}</span> of <span className="mono">{filtered.length}</span>
+            </div>
+
+            <div className="inventory-pagination-controls">
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={() => setCurrentPage(page => Math.max(1, page - 1))}
+                disabled={effectivePage === 1}
+              >
+                ← Prev
+              </button>
+
+              <div className="inventory-page-list">
+                {pageNumbers.map((page, index) =>
+                  page === '…' ? (
+                    <span key={`dots-${index}`} className="inventory-page-dots">…</span>
+                  ) : (
+                    <button
+                      key={`page-${page}`}
+                      className={`inventory-page-btn${page === effectivePage ? ' active' : ''}`}
+                      onClick={() => setCurrentPage(page)}
+                    >
+                      {page}
+                    </button>
+                  )
+                )}
+              </div>
+
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={() => setCurrentPage(page => Math.min(totalPages, page + 1))}
+                disabled={effectivePage === totalPages}
+              >
+                Next →
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )

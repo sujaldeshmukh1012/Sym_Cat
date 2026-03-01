@@ -5,16 +5,12 @@ export default function Dashboard({ setActivePage }) {
   const [stats, setStats] = useState({ inventory: 0, parts: 0, logs: 0, reports: 0 })
   const [recentLogs, setRecentLogs] = useState([])
   const [lowStock, setLowStock] = useState([])
-  const [topFleetHealth, setTopFleetHealth] = useState([])
-  const [fleetHealthLoading, setFleetHealthLoading] = useState(false)
-  const [fleetHealthError, setFleetHealthError] = useState('')
   const [loading, setLoading] = useState(true)
   const [lastUpdated, setLastUpdated] = useState('')
   const [dashboardError, setDashboardError] = useState('')
 
   useEffect(() => {
     fetchDashboardData()
-    fetchTopFleetHealth()
   }, [])
 
   async function fetchDashboardData() {
@@ -122,63 +118,6 @@ export default function Dashboard({ setActivePage }) {
     setLoading(false)
   }
 
-  async function fetchTopFleetHealth() {
-    setFleetHealthLoading(true)
-    setFleetHealthError('')
-
-    try {
-      const fleetsRes = await supabase
-        .from('fleet')
-        .select('id, name, serial_number')
-        .order('id', { ascending: true })
-        .limit(12)
-
-      if (fleetsRes.error) throw new Error(fleetsRes.error.message)
-
-      const fleets = fleetsRes.data || []
-      if (fleets.length === 0) {
-        setTopFleetHealth([])
-        return
-      }
-
-      const results = await Promise.all(
-        fleets.map(async fleet => {
-          const controller = new AbortController()
-          const timeoutId = window.setTimeout(() => controller.abort(), 12000)
-          try {
-            const response = await fetch(`/fleet-health/${fleet.id}?limit=3`, { signal: controller.signal })
-            if (!response.ok) return null
-            const payload = await response.json()
-            return {
-              fleet_id: fleet.id,
-              fleet_name: fleet.name || `Fleet ${fleet.id}`,
-              health_score: Number(payload?.health_score ?? payload?.summary?.current_health_score ?? 0),
-              timeline: payload?.timeline || [],
-            }
-          } finally {
-            window.clearTimeout(timeoutId)
-          }
-        })
-      )
-
-      const topThree = results
-        .filter(Boolean)
-        .sort((a, b) => b.health_score - a.health_score)
-        .slice(0, 3)
-
-      setTopFleetHealth(topThree)
-    } catch (err) {
-      if (err?.name === 'AbortError') {
-        setFleetHealthError('Fleet health request timed out. Please retry.')
-      } else {
-        setFleetHealthError('Failed to load fleet health metrics.')
-      }
-      setTopFleetHealth([])
-    } finally {
-      setFleetHealthLoading(false)
-    }
-  }
-
   const kpis = [
     { label: 'Inventory Items', value: stats.inventory, icon: '▦', page: 'inventory' },
     { label: 'Machine Parts', value: stats.parts, icon: '⚙', page: 'parts' },
@@ -186,41 +125,16 @@ export default function Dashboard({ setActivePage }) {
     { label: 'Total Reports', value: stats.reports, icon: '◻', page: 'reports' },
   ]
 
-  const maxFleetHealth = Math.max(1, ...topFleetHealth.map(item => Number(item.health_score) || 0))
-
-  const anomalyTaskCounts = topFleetHealth
-    .flatMap(fleet => fleet.timeline || [])
-    .flatMap(inspection => inspection.tasks || [])
-    .filter(task => Number(task.anomaly_count) > 0)
-    .reduce((accumulator, task) => {
-      const key = task.component || 'Unknown task'
-      const value = Number(task.anomaly_count) || 0
-      accumulator[key] = (accumulator[key] || 0) + value
-      return accumulator
-    }, {})
-
-  const topAnomalyTasks = Object.entries(anomalyTaskCounts)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 5)
-
-  const maxTaskCount = Math.max(1, ...topAnomalyTasks.map(([, count]) => count))
-
-  function getScoreBadgeClass(scoreValue) {
-    const score = Number(scoreValue)
-    if (Number.isNaN(score)) return 'badge-info'
-    if (score >= 80) return 'badge-success'
-    if (score >= 60) return 'badge-warning'
-    return 'badge-critical'
-  }
-
   function getStateBadgeClass(stateValue) {
     const normalized = String(stateValue ?? '').replace(/^"|"$/g, '').toLowerCase().trim()
     const successStates = ['completed', 'confirmed', 'approved', 'resolved', 'pass']
-    const warningStates = ['pending', 'in_progress', 'in progress', 'in-progress', 'inprogress', 'monitor', 'queued']
+    const pendingStates = ['pending', 'queued']
+    const inProgressStates = ['in_progress', 'in progress', 'in-progress', 'inprogress', 'monitor']
     const criticalStates = ['declined', 'rejected', 'failed', 'fail', 'error', 'critical']
 
     if (successStates.includes(normalized)) return 'badge-success'
-    if (warningStates.includes(normalized)) return 'badge-warning'
+    if (pendingStates.includes(normalized)) return 'badge-warning'
+    if (inProgressStates.includes(normalized)) return 'badge-info-soft'
     if (criticalStates.includes(normalized)) return 'badge-critical'
     return 'badge-info'
   }
@@ -246,7 +160,6 @@ export default function Dashboard({ setActivePage }) {
           className="btn btn-sm dashboard-refresh-btn"
           onClick={() => {
             fetchDashboardData()
-            fetchTopFleetHealth()
           }}
         >
           ↻ Refresh
@@ -286,125 +199,29 @@ export default function Dashboard({ setActivePage }) {
 
       {/* Alerts section */}
       {lowStock.length > 0 && (
-        <div className="alert-banner warning" style={{ marginBottom: 24 }}>
-          <span style={{ fontSize: 18 }}>⚠</span>
-          <div>
-            <div className="alert-banner-title">Low Stock Warning — {lowStock.length} item(s) below threshold</div>
-            <div className="alert-banner-body">
-              {lowStock.map(i => `${i.part_name || 'Unnamed part'} (qty: ${i.stock_qty ?? 0})`).join(' · ')}
+        <div className="alert-banner warning dashboard-low-stock-alert" style={{ marginBottom: 24 }}>
+          <span className="dashboard-low-stock-icon">⚠</span>
+          <div className="dashboard-low-stock-content">
+            <div className="dashboard-low-stock-header">
+              <div className="alert-banner-title">Low Stock Warning</div>
+              <span className="badge badge-warning">
+                <span className="badge-dot" /> {lowStock.length} item(s) below threshold
+              </span>
+            </div>
+            <div className="dashboard-low-stock-list" aria-label="Low stock items">
+              {lowStock.map(item => (
+                <span key={item.id} className="dashboard-low-stock-pill">
+                  <span>{item.part_name || 'Unnamed part'}</span>
+                  <span className="mono">qty: {item.stock_qty ?? 0}</span>
+                </span>
+              ))}
             </div>
           </div>
-          <button className="btn btn-secondary btn-sm" style={{ marginLeft: 'auto' }} onClick={() => setActivePage('inventory')}>
+          <button className="btn btn-sm dashboard-low-stock-cta" style={{ marginLeft: 'auto' }} onClick={() => setActivePage('inventory')}>
             View Inventory
           </button>
         </div>
       )}
-
-      {fleetHealthError && (
-        <div className="alert-banner critical" style={{ marginBottom: 24 }}>
-          <span>✕</span>
-          <div>
-            <div className="alert-banner-title">Fleet Health Error</div>
-            <div className="alert-banner-body">{fleetHealthError}</div>
-          </div>
-        </div>
-      )}
-
-      <div className="card dashboard-panel-card" style={{ marginBottom: 24 }}>
-        <div className="card-header">
-          <span className="card-title">◉ Fleet Health Analytics</span>
-        </div>
-        <div className="card-body" style={{ paddingTop: 14 }}>
-          {fleetHealthLoading ? (
-            <div>
-              {[...Array(3)].map((_, i) => <div key={i} className="skeleton skeleton-row" style={{ marginBottom: 8 }} />)}
-            </div>
-          ) : topFleetHealth.length === 0 ? (
-            <div className="empty-state" style={{ padding: 24 }}>
-              <div className="empty-state-icon">◉</div>
-              <div className="empty-state-title">No health inspections yet</div>
-              <div className="empty-state-desc">Run inspections for this fleet to view health progression</div>
-            </div>
-          ) : (
-            <div className="grid-2" style={{ alignItems: 'start' }}>
-              <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 14 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
-                  <span className="card-title" style={{ fontSize: 13 }}>Fleet Health Score (Top 3 Fleets)</span>
-                </div>
-
-                <div style={{ display: 'grid', gap: 12 }}>
-                  {topFleetHealth.map(fleet => {
-                    const score = Number(fleet.health_score) || 0
-                    return (
-                      <div key={fleet.fleet_id}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginBottom: 4 }}>
-                          <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
-                            {fleet.fleet_name}
-                            {fleet.serial_number ? (
-                              <span className="mono" style={{ color: 'var(--text-secondary)', fontSize: 12 }}> ({fleet.serial_number})</span>
-                            ) : null}
-                          </span>
-                          <span className={`badge ${getScoreBadgeClass(score)}`}><span className="badge-dot" /> {score.toFixed(1)}</span>
-                        </div>
-                        <div style={{ width: '100%', height: 12, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 999 }}>
-                          <div
-                            style={{
-                              height: '100%',
-                              width: `${Math.max(8, (score / maxFleetHealth) * 100)}%`,
-                              borderRadius: 999,
-                              background:
-                                score >= 80
-                                  ? 'var(--success)'
-                                  : score >= 60
-                                    ? 'var(--warning)'
-                                    : 'var(--critical)',
-                            }}
-                          />
-                        </div>
-                    </div>
-                    )
-                  })}
-                </div>
-              </div>
-
-              <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 14 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
-                  <span className="card-title" style={{ fontSize: 13 }}>Top Anomaly Tasks</span>
-                  <span className="badge badge-info"><span className="badge-dot" /> Across top fleets</span>
-                </div>
-
-                {topAnomalyTasks.length === 0 ? (
-                  <div className="empty-state" style={{ padding: 12 }}>
-                    <div className="empty-state-title">No anomaly tasks found</div>
-                    <div className="empty-state-desc">Bars will appear once anomaly-linked tasks are recorded</div>
-                  </div>
-                ) : (
-                  <div style={{ display: 'grid', gap: 10 }}>
-                    {topAnomalyTasks.map(([task, count]) => (
-                      <div key={task}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginBottom: 4 }}>
-                          <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--text-primary)' }}>{task}</span>
-                          <span className="badge badge-warning"><span className="badge-dot" /> {count}</span>
-                        </div>
-                        <div style={{ width: '100%', height: 10, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 999 }}>
-                          <div
-                            style={{
-                              height: '100%',
-                              width: `${Math.max(8, (count / maxTaskCount) * 100)}%`,
-                              borderRadius: 999,
-                              background: 'var(--warning)',
-                            }}
-                          />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
 
       {/* Operational Overview */}
       <div className="grid-2 dashboard-panels" style={{ marginBottom: 24 }}>

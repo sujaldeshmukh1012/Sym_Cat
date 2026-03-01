@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import Sidebar from '../components/Sidebar'
 import TopBar from '../components/TopBar'
 import Dashboard from '../pages/Dashboard'
+import FleetHealthAnalytics from '../pages/FleetHealthAnalytics'
 import Inventory from '../pages/Inventory'
 import MachineParts from '../pages/MachineParts'
 import Logs from '../pages/Logs'
@@ -9,8 +10,24 @@ import Reports from '../pages/Reports'
 import OrderCart from '../pages/OrderCart'
 import './App.css'
 
+const PAGE_STORAGE_KEY = 'symcat-active-page'
+const VALID_PAGES = new Set([
+  'dashboard',
+  'fleet_health_analytics',
+  'inventory',
+  'parts',
+  'logs',
+  'reports',
+  'order_cart',
+])
+
+function getInitialPage() {
+  const saved = localStorage.getItem(PAGE_STORAGE_KEY)
+  return VALID_PAGES.has(saved) ? saved : 'dashboard'
+}
+
 export default function App() {
-  const [activePage, setActivePage] = useState('dashboard')
+  const [activePage, setActivePage] = useState(getInitialPage)
   const [offlineMode, setOfflineMode] = useState(!navigator.onLine)
 
   useEffect(() => {
@@ -31,8 +48,13 @@ export default function App() {
     }
   }, [])
 
+  useEffect(() => {
+    localStorage.setItem(PAGE_STORAGE_KEY, activePage)
+  }, [activePage])
+
   const pages = {
     dashboard: <Dashboard setActivePage={setActivePage} />,
+    fleet_health_analytics: <FleetHealthAnalytics />,
     inventory: <Inventory />,
     parts: <MachineParts />,
     logs: <Logs />,
