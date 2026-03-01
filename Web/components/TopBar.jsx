@@ -32,7 +32,7 @@ export default function TopBar({ activePage }) {
     <header className="topbar">
       <div className="topbar-logo">
         <div className="topbar-logo-mark">⚙</div>
-        SymCat
+        Symbiote
       </div>
       <div className="topbar-divider" />
       <span className="topbar-page-title">{PAGE_TITLES[activePage]}</span>

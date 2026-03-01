@@ -24,7 +24,7 @@ export default function Sidebar({ activePage, setActivePage }) {
         ))}
       </nav>
       <div className="sidebar-footer">
-        SymCat v1.0<br />
+        Symbiote v1.0<br />
         <span style={{ fontSize: 11 }}>Powered by Supabase</span>
       </div>
     </aside>
